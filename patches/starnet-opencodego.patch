@@ -1,0 +1,512 @@
+diff --git a/frontend/app/app.js b/frontend/app/app.js
+index 0f57e03c..892ef52e 100644
+--- a/frontend/app/app.js
++++ b/frontend/app/app.js
+@@ -385,7 +385,12 @@ const App = (() => {
+     // (Fork.shouldOffer over the live understanding read) — self-retiring: once the station knows how the
+     // Commander likes work done, this block vanishes and forks stop appearing. Fail-closed on any hiccup.
+     if (typeof Fork !== 'undefined' && typeof UnderstandingStore !== 'undefined') {
+-      try { if (Fork.shouldOffer(UnderstandingStore.read())) p += '\n\n' + Fork.directive(); } catch (_) {}
++      try {
++        // NO-QUESTIONS station (DEV payload noQuestions): the fork directive is never composed, so an
++        // unattended crew can never stop to ask a preference question. Fail-closed to suppressed.
++        const noQ = !!(typeof window !== 'undefined' && window.__STARNET_DEV__ && window.__STARNET_DEV__.noQuestions);
++        if (!noQ && Fork.shouldOffer(UnderstandingStore.read())) p += '\n\n' + Fork.directive();
++      } catch (_) {}
+     }
+     return p;
+   }
+@@ -840,6 +845,7 @@ const App = (() => {
+     if (p === 'starnet' || p === 'starnet-cloud' || p === 'managed') return 'starnet';
+     if (p === 'ollama' || p === 'ollama-local') return 'ollama';
+     if (p === 'custom' || p === 'openai-compatible' || p === 'local' || p === 'vllm' || p === 'lmstudio') return 'custom';
++    if (p === 'opencode-go' || p === 'opencodego') return 'opencode-go';
+     return 'openrouter';
+   }
+   function providerNeedsKey(provider) {
+@@ -851,7 +857,8 @@ const App = (() => {
+     return p !== 'codex' && p !== 'grok' && p !== 'kimi' && p !== 'ollama' && p !== 'starnet';
+   }
+   function providerNeedsBaseUrl(provider) {
+-    return normalizeProviderId(provider) === 'custom';
++    const p = normalizeProviderId(provider);
++    return p === 'custom' || p === 'opencode-go';
+   }
+   function providerKeyPlaceholder(provider, configured) {
+     const p = normalizeProviderId(provider);
+@@ -868,6 +875,7 @@ const App = (() => {
+     if (p === 'perplexity') return 'pplx-...  -  perplexity.ai/settings/api';
+     if (p === 'cerebras') return 'Cerebras API key';
+     if (p === 'custom') return 'optional API key for this endpoint';
++    if (p === 'opencode-go') return 'local proxy bearer  -  your OpenCode Go failover proxy config';
+     return 'sk-or-...  -  openrouter.ai/keys';
+   }
+   // Where a NEW user actually GETS a key for this provider — the same destinations the key placeholder
+diff --git a/frontend/app/harness.js b/frontend/app/harness.js
+index d1aa94bf..64209af9 100644
+--- a/frontend/app/harness.js
++++ b/frontend/app/harness.js
+@@ -312,6 +312,7 @@ const Harness = (() => {
+     if (p === 'starnet' || p === 'starnet-cloud' || p === 'managed') return 'starnet';
+     if (p === 'ollama' || p === 'ollama-local') return 'ollama';
+     if (p === 'custom' || p === 'openai-compatible' || p === 'local' || p === 'vllm' || p === 'lmstudio') return 'custom';
++    if (p === 'opencode-go' || p === 'opencodego') return 'opencode-go';
+     return 'openrouter';
+   }
+   function providerSlot(base, provider) {
+diff --git a/frontend/app/modeldock.js b/frontend/app/modeldock.js
+index 5c14d193..245e7bd5 100644
+--- a/frontend/app/modeldock.js
++++ b/frontend/app/modeldock.js
+@@ -56,7 +56,7 @@ const ModelDock = (() => {
+     qwen: 'QWEN',
+     cohere: 'COHERE'
+   };
+-  const PROVIDER_RANK = { starnet: -1, codex: 0, grok: 1, kimi: 2, openrouter: 3, openai: 4, anthropic: 5, gemini: 6, xai: 7, groq: 8, mistral: 9, deepseek: 10, together: 11, fireworks: 12, perplexity: 13, cerebras: 14, ollama: 15, custom: 16 };
++  const PROVIDER_RANK = { starnet: -1, codex: 0, grok: 1, kimi: 2, openrouter: 3, openai: 4, anthropic: 5, gemini: 6, xai: 7, groq: 8, mistral: 9, deepseek: 10, together: 11, fireworks: 12, perplexity: 13, cerebras: 14, ollama: 15, 'opencode-go': 16, custom: 17 };
+ 
+   let opts = {};
+   let wired = false;
+@@ -104,6 +104,7 @@ const ModelDock = (() => {
+     if (p === 'starnet' || p === 'starnet-cloud' || p === 'managed') return 'starnet';
+     if (p === 'ollama' || p === 'ollama-local') return 'ollama';
+     if (p === 'custom' || p === 'openai-compatible' || p === 'local' || p === 'vllm' || p === 'lmstudio') return 'custom';
++    if (p === 'opencode-go' || p === 'opencodego') return 'opencode-go';
+     return 'openrouter';
+   }
+   function isAgentModel(item) {
+@@ -463,7 +464,7 @@ const ModelDock = (() => {
+         if (!Array.isArray(j.models)) throw new Error((j && j.error) || 'invalid catalog response');
+         list = j.models.map(m => asModel(m, p)); confirmed = !j.fallback && !list.some(m => m.fallback);
+       } else if (typeof Harness !== 'undefined' && Harness.listModels) {
+-        if (!providerEnabled(p)) return disconnected();
++        if (!providerEnabled(p) && p !== provider()) return disconnected();
+         try {
+           // The catalog must describe the SAME endpoint this provider's runs hit: a per-provider base URL rides every
+           // run body (harness.js chat), so listing the default endpoint instead showed models — and reasoning dials —
+diff --git a/frontend/app/world.js b/frontend/app/world.js
+index fda9a918..24adc7fc 100644
+--- a/frontend/app/world.js
++++ b/frontend/app/world.js
+@@ -7675,10 +7675,20 @@ const World = (() => {
+     // keep the HERO's caption up while it's still SPEAKING (a streamed neural reply can outlast the bubble's
+     // fixed timer) — so the on-screen line and the voice stay in phase. Crew bodies just follow the timer.
+     const speakingNow = (who === agent) && typeof Voice !== 'undefined' && Voice.isSpeaking && Voice.isSpeaking();
++    const sayLive = !!(s.text && (s.until >= now || speakingNow));
++    /* LIVE WORK BUBBLE (2026-09-29): while a body is WORKING, a persistent bubble names what it is doing right
++       now (its current tool), so every working agent is legible at all times — not just for the 4.2s a spoken
++       line lasts. A real spoken line ALWAYS wins the one bubble (never two cards over one head); the work status
++       shows only when there is no live speech. Same card, same anchor, so the two can never drift apart. */
++    let st = null;
++    if (!sayLive) {
++      const ls = liveStatusByAgent.get(liveStatusAgentId(who));
++      if (ls && ls.text && ls.until >= now) st = ls;
++    }
+     // W6: nothing REAL to say ⇒ fall through to the peer-chatter bubble (which draws only during an
+-    // actual conversation, and nothing otherwise). One function, one bubble: a real line always wins
+-    // the anchor, and the two can never stack over one head.
+-    if (!s.text || (s.until < now && !speakingNow)) { drawChatterBubble(now, who); return; }
++    // actual conversation, and nothing otherwise). One function, one bubble.
++    if (!sayLive && !st) { drawChatterBubble(now, who); return; }
++    const shown = sayLive ? s : st;
+ 
+     // draw in SCREEN space (mirrors drawNameplate): pixel-snapped, unsmoothed VT323 that reads cleanly at any
+     // zoom, then it rides the same barrel-curve/scanline pass the rest of the feed does. All geometry is CSS px.
+@@ -7690,7 +7700,7 @@ const World = (() => {
+ 
+     // Wrap to <=3 lines; ellipsize overflow, including unbroken identifiers.
+     const fontSz = 16, lh = 17, padX = 6, padY = 5, tailW = 4, tailH = 5;
+-    const raw = String(s.text);
++    const raw = String(shown.text);
+     const tag = raw.match(/^(working|error|blocked):\s*/i);
+     const label = tag ? tag[1].toUpperCase() : '';
+     const labelH = label ? 13 : 0;
+@@ -8344,6 +8354,11 @@ const World = (() => {
+          lost permission.response would otherwise strand the hero at the wait anchor forever.
+      Cheap: iterates only the (usually tiny) live maps, once per second. */
+   function sweepStaleStates(now) {
++    // LIVE WORK BUBBLES: drop any status whose last event is older than the TTL, so a lost run.end can never
++    // strand a "working: …" bubble over an idle body forever.
++    if (liveStatusByAgent.size) {
++      for (const [aid, st] of Array.from(liveStatusByAgent)) if (now - (st && st.at || 0) > LIVE_STATUS_TTL_MS) liveStatusByAgent.delete(aid);
++    }
+     if (runStartByAgent.size) {
+       for (const aid of Array.from(runStartByAgent.keys())) {
+         const seen = runLastSeenByAgent.get(aid) || runStartByAgent.get(aid) || 0;
+@@ -9683,6 +9698,34 @@ const World = (() => {
+   const TICKER_IDLE_MS = 7000;      // clean frame after 7s of no activity
+   // tool-in-flight state for the STRETCH desk glyph: agentId -> { name, callId } while a tool_call is open.
+   const glyphByAgent = new Map();
++  /* LIVE WORK BUBBLE (2026-09-29): what each WORKING agent is doing RIGHT NOW, shown as a persistent speech
++     bubble over its head for the WHOLE time it works (not a 4.2s flicker). Fed by the SAME real events the desk
++     glyph rides (agent.run.start / agent.tool_call / agent.tool_result / agent.run.end) so it can only ever say
++     what the harness actually reported — truthful telemetry. Keyed by agentId; hero and crew both included.
++     `until` is a safety TTL, renewed on every event, so a lost run.end degrades to silence instead of a stuck
++     bubble. */
++  const liveStatusByAgent = new Map();   // agentId -> { text, at, until }
++  const LIVE_STATUS_TTL_MS = 120000;     // 2 min without any event for an agent => drop its live bubble
++  function liveStatusAgentId(b) {
++    if (!b) return '';
++    if (b === agent) return (agent && agent.id) || 'agent';
++    return String(b.agentId || b.id || '');
++  }
++  function setLiveStatus(aid, text) {
++    const id = String(aid || '');
++    if (!id) return;
++    const t = String(text || '').replace(/\s+/g, ' ').trim().slice(0, 140);
++    if (!t) { liveStatusByAgent.delete(id); return; }
++    const now = (typeof performance !== 'undefined') ? performance.now() : fnow;
++    liveStatusByAgent.set(id, { text: t, at: now, until: now + LIVE_STATUS_TTL_MS });
++  }
++  function clearLiveStatus(aid) { const id = String(aid || ''); if (id) liveStatusByAgent.delete(id); }
++  // a human phrase for the live bubble: the tool it is running (name-only views carry no args), else a generic line.
++  function liveStatusText(name) {
++    const n = String(name || '').trim();
++    if (!n) return 'working…';
++    return 'working: ' + tickerTool(n);
++  }
+ 
+   // codename for an agentId (hero or crew body), else a short id fallback — never throws.
+   function tickerName(aid) {
+@@ -9833,13 +9876,23 @@ const World = (() => {
+     });
+     // ── STRETCH: desk work-glyph state — a tool in flight (tool_call → its tool_result) marks the agent;
+     //    the render pass (drawWorkGlyphs) draws a tiny tag at that desk. run.end clears any stale mark. ──
+-    U.bus.on('agent.tool_call', p => { if (p && p.agentId && p.name) glyphByAgent.set(p.agentId, { name: p.name, callId: p.callId || null }); });
++    U.bus.on('agent.tool_call', p => {
++      if (!p || !p.agentId || !p.name) return;
++      glyphByAgent.set(p.agentId, { name: p.name, callId: p.callId || null });
++      // LIVE WORK BUBBLE: name the tool this agent is running right now (+ a clipped args hint when the caller
++      // shipped one — interactive runs do, the name-only autonomous view does not). Renewed on every call.
++      const args = p.argsSummary ? (' — ' + tickerClip(String(p.argsSummary), 72)) : '';
++      setLiveStatus(p.agentId, liveStatusText(p.name) + args);
++    });
+     U.bus.on('agent.tool_result', p => {
+       if (!p || !p.agentId) return;
+       const g = glyphByAgent.get(p.agentId);
+       if (g && (!p.callId || !g.callId || g.callId === p.callId)) glyphByAgent.delete(p.agentId);
++      // the tool finished: the bubble goes back to a neutral "working" so it never shows a finished tool as current.
++      if (liveStatusByAgent.has(String(p.agentId))) setLiveStatus(p.agentId, 'working…');
+     });
+-    U.bus.on('agent.run.end', p => { if (p && p.agentId) glyphByAgent.delete(p.agentId); });
++    U.bus.on('agent.run.end', p => { if (p && p.agentId) { glyphByAgent.delete(p.agentId); clearLiveStatus(p.agentId); } });
++    U.bus.on('agent.run.error', p => { if (p && p.agentId) clearLiveStatus(p.agentId); });
+     U.bus.on('workitem.placed', p => intakeMessage(p));
+     // LINE WATCH: the bay lamps + crate cards fold the same run/crate events the floor animates (linewatch.js)
+     for (const n of ['workitem.placed', 'workitem.superseded', 'agent.run.start', 'agent.cost', 'agent.run.error', 'agent.run.end']) U.bus.on(n, p => watchEvent(n, p));
+@@ -9932,7 +9985,13 @@ const World = (() => {
+     // construction server-initiated (schedule/event/nightshift today) and takes the pose — the old
+     // schedule|event whitelist silently dropped trigger 'nightshift', so a self-initiated task ran while the
+     // body wandered idle (2026-07-18: the app asserting idle over a provably live run).
+-    U.bus.on('agent.run.start', p => { if (p && p.agentId && p.trigger && p.trigger !== 'directive') { serverLit.add(p.agentId); if (agent && p.agentId === agent.id) agent.taskViaConveyor = true; setActivityFor(p.agentId, 'task'); } });
++    U.bus.on('agent.run.start', p => {
++      if (!p || !p.agentId) return;
++      // LIVE WORK BUBBLE: EVERY agent that starts a run gets a bubble, directive or not — the Commander asked to
++      // see what each working agent is doing at all times, hero included. A tool_call refines it a beat later.
++      setLiveStatus(p.agentId, 'working…');
++      if (p.trigger && p.trigger !== 'directive') { serverLit.add(p.agentId); if (agent && p.agentId === agent.id) agent.taskViaConveyor = true; setActivityFor(p.agentId, 'task'); }
++    });
+     U.bus.on('agent.run.end', p => { if (p && p.agentId && !noteRunEnd(p.agentId, p.runId) && serverLit.has(p.agentId)) { serverLit.delete(p.agentId); setActivityFor(p.agentId, 'idle'); } });
+     // M-mem.4 → notification diet (2026-08-18): auto-compaction no longer toasts — it is loop plumbing,
+     // not news. The bottom-bar CTX gauge still flashes its mint "compacted" echo (StationUI listens to
+diff --git a/frontend/index.html b/frontend/index.html
+index da269e31..f9213c7b 100644
+--- a/frontend/index.html
++++ b/frontend/index.html
+@@ -208,7 +208,8 @@
+                      path the user actually completed (app.js onWakeAttempt). -->
+                 <button class="prov" data-prov="grok" aria-pressed="false">GROK</button>
+                 <button class="prov" data-prov="kimi" aria-pressed="false">KIMI</button>
+-                <button class="prov" data-prov="openrouter" aria-pressed="false">OPENROUTER</button>
++                <button class="prov" data-prov="openrouter" aria-pressed="false">OPENROUTER</button>
++                <button class="prov" data-prov="opencode-go" aria-pressed="false">OPENCODE GO</button>
+                 <button class="prov" data-prov="openai" aria-pressed="false">OPENAI</button>
+                 <button class="prov" data-prov="anthropic" aria-pressed="false">ANTHROPIC</button>
+                 <button class="prov" data-prov="gemini" aria-pressed="false">GEMINI</button>
+diff --git a/sidecar/cron-driver.js b/sidecar/cron-driver.js
+index 6e497950..7390c42c 100644
+--- a/sidecar/cron-driver.js
++++ b/sidecar/cron-driver.js
+@@ -64,6 +64,14 @@
+   const { note: failNote } = (typeof require === 'function') ? require('./failopen.js') : { note: function (tag, e) { console.warn('[failopen] ' + tag + ':', (e && e.message) || e); } };
+ 
+   const SILENT_MARKER = '[SILENT]';
++  /* CREW-AWARE ROUTINES (2026-09-29). A scheduled fire used to run as a plain worker: no orchestrator object, so
++     the routine's agent could NOT call team.dispatch and a "run this as a full-crew operation" routine silently
++     did the whole job solo. A routine is exactly the unattended surface where orchestration pays off, so a
++     scheduled fire is now a LEAD by default — it gets team.dispatch and can fan the work out to the roster crew.
++     Opt out with STARNET_CRON_LEAD=0 (SKYNET_CRON_LEAD honored via the same convention) for a station that wants
++     routines to stay strictly single-agent. Default on: the delegation invariant that matters is unchanged —
++     DELEGATED WORKERS still never receive the orchestrator object, so a worker can never re-delegate. */
++  const CRON_LEAD = String((process.env.STARNET_CRON_LEAD != null ? process.env.STARNET_CRON_LEAD : process.env.SKYNET_CRON_LEAD) || '').trim() !== '0';
+   const iso = cron._internals.iso;   // ms(arg) -> ISO; deterministic (the lint bans only the zero-arg new Date)
+   // B4 redacted-egress: the SAME structural redaction the channel tee applies, so both autonomous lanes
+   // (routed messages + scheduled cron) ship one shape to the floor — tool_call name-only, tool_result
+@@ -481,6 +489,9 @@
+         p = runOnce({
+           key: key, model: model, system: system, messages: messages,
+           agentId: job.agentId, isTask: true, emit: sink, signal: ac.signal,
++          // CREW-AWARE ROUTINES: a scheduled fire is a LEAD (orchestrator object -> team.dispatch) so a routine
++          // can run a full-crew operation instead of doing everything solo. See CRON_LEAD above.
++          lead: CRON_LEAD,
+           // streamId 'cron-'+runId makes this run's transcript durable under a per-RUN named stream (runId is a
+           // fresh newId() already in scope — determinism-clean). Without it the reply is buffered into `state.buf`
+           // and only an outcome enum escapes, so the actual work is invisible: it persists under the 'global'
+diff --git a/sidecar/index.js b/sidecar/index.js
+index 05744537..80266a05 100644
+--- a/sidecar/index.js
++++ b/sidecar/index.js
+@@ -3168,6 +3168,12 @@ async function runSkillCurator(o) {
+    Full Access is FROZEN at boot: a tool or model output cannot flip it at runtime — closes the
+    prompt-injection escalation path (mirrors the reference harness's import-frozen YOLO flag). */
+ const FULL_ACCESS = /^(1|true|yes|on)$/i.test(String(ENV('FULL_ACCESS') || '').trim());
++/* NO QUESTIONS (2026-09-28, the Commander's explicit call): the station runs fully unattended, so no agent
++   may pause to ask the Commander anything. When ON, the TASK CONTEXT clarification directive is never
++   composed into the system prompt (and the fork directive is suppressed in the page via the DEV payload),
++   so a run always decides, acts, and finishes. STARNET_NO_QUESTIONS=1 enables it; FULL_ACCESS implies it
++   because a hands-off station that still interviews the Commander is self-contradictory. */
++const NO_QUESTIONS = /^(1|true|yes|on)$/i.test(String(ENV('NO_QUESTIONS') || '').trim()) || FULL_ACCESS;
+ /* MASTER BYPASS (2026-08-05, the Commander's explicit call) — the runtime "FULL BYPASS" switch behind
+    Settings → PERMISSIONS. When ON: every agent, every surface (watched chat, Telegram, routines, night
+    shift) skips the consent broker AND gets owner-DM-grade impact reach (shell, media, connectors)
+@@ -13297,6 +13303,10 @@ async function handleCronRun(req, res) {
+       // identical cron.fire/cron.result events, can fetch the real output via /api/transcript?stream=cron-<runId>.
+       // Per-run id keeps the seed empty (index.js reconstructs a stream only when messages<=1) — no behavior drift.
+       runId: runId, streamId: 'cron-' + runId, surface: 'autonomous', trigger: 'schedule', provider: provider, broadcast: true,
++      // CREW-AWARE ROUTINES (2026-09-29): Run Now must match the scheduled fire's posture EXACTLY, so it is a LEAD
++      // too (orchestrator object -> team.dispatch) — a routine that runs its crew on schedule must run its crew
++      // from the button. STARNET_CRON_LEAD=0 restores the old single-agent fire on both paths.
++      lead: String((process.env.STARNET_CRON_LEAD != null ? process.env.STARNET_CRON_LEAD : process.env.SKYNET_CRON_LEAD) || '').trim() !== '0',
+       // LINE WATCH: the row records the bay + line this Run Now's crate named (placeCronWorkitem above)
+       lineId: (cronItems.get(runId) || {}).lineId || undefined, dockId: (cronItems.get(runId) || {}).dockId || undefined,
+       reflect: true,   // Run Now must match the scheduled fire's posture exactly, memory included (see the reflect note on /api/run)
+@@ -18262,7 +18272,10 @@ async function runOnceCore(o) {
+       + (anyTrack ? '\n  A [bracketed] note is that specialist\'s REAL track record on this station — earned from work the '
+         + 'Commander rated and runs the harness watched finish. Use it to pick the right worker; it is evidence, not a '
+         + 'permission level, and an agent without one is simply new, not worse.' : '');
+-    teamNote += '\n• SPAWN temporary same-identity subagents with team.spawn for one-off parallel subtasks when no named specialist is needed. '
++    teamNote += '\n• PREFER team.dispatch TO YOUR NAMED CREW. Whenever one of the specialists listed above fits a subtask, '
++      + 'delegate to THAT agentId — the Commander watches each named specialist work on the floor, so a named worker is '
++      + 'both the right owner for the work and visible while it runs. Use team.spawn ONLY when NO listed specialist fits '
++      + 'a genuine one-off subtask (its clones are anonymous and ephemeral). '
+       + 'Use background:true for watchable long-running spawned workers, then inspect/control them with team.subagents, team.interrupt, and team.resume. '
+       + 'When a running background worker needs a mid-flight correction or new information, use team.steer (pass the id and generation from team.subagents) instead of interrupting and restarting it.';
+     // Class Loadouts S1: the class list here is composed from the SHARED catalog (id + tagline), never hardcoded,
+@@ -18419,7 +18432,7 @@ async function runOnceCore(o) {
+   // RUN quests bind only through quest.update op:"start" (or a successful named progress tick). Admission cannot
+   // infer which of several open objectives this arbitrary task is doing, so it deliberately binds nothing here.
+   let taskIntentNote = '';
+-  if (taskBrief) taskIntentNote = '\n\n' + TaskIntent.directive(taskContextBlock);
++  if (taskBrief && !NO_QUESTIONS) taskIntentNote = '\n\n' + TaskIntent.directive(taskContextBlock);
+   // SERVICE KEYS (KEYS tab): advertise the env-var NAMES of the Commander's connected platform keys — value never
+   // rides the prompt. TRUTHFUL-TELEMETRY GATE: the block says "available to your shell commands", so it composes
+   // ONLY when shell.exec is in THIS run's resolved tool set (same discipline as the quest block above). A user with
+@@ -22727,7 +22740,27 @@ async function serveStatic(req, res) {
+       // `hasKey` is the honest half: the page's credential badge assumed a DEV boot meant the host HELD a
+       // runtime key for `prov`, so a seeded station with no key at all still rendered "● KEY SAVED". Say
+       // whether one actually exists — still no secret crosses, only the boolean.
+-      if (DEV_MODE) boot += 'window.__STARNET_DEV__=' + JSON.stringify({ model: CRON_DEFAULT_MODEL || '', prov: (!runtimeKey && codexTokens && codexTokens.access_token) ? 'codex' : 'openrouter', hasKey: !!runtimeKey }) + ';';
++      if (DEV_MODE) {
++        // The seeded provider is the STATION'S OWN configured provider (STARNET_DEFAULT_PROVIDER), never a
++        // hardcoded openrouter: a boot payload naming the wrong provider made the model dock reconcile the
++        // seeded model against the WRONG catalog, clearing it or mangling it (muse-spark -> meta/muse-spark),
++        // so the page rendered "no model selected" and every run failed. `hasKey` stays honest per provider.
++        const devProv = normalizeProviderId(String(ENV('DEFAULT_PROVIDER') || '').trim())
++          || ((!runtimeKey && codexTokens && codexTokens.access_token) ? 'codex' : 'openrouter');
++        const devKey = providerRuntimeKey(devProv, '');
++        const devBase = providerRuntimeBaseUrl(devProv, '');
++        boot += 'window.__STARNET_DEV__=' + JSON.stringify({
++          model: CRON_DEFAULT_MODEL || '',
++          prov: devProv,
++          hasKey: !!(runtimeKey || providerHasCredential(devProv, devKey, devBase)),
++          noQuestions: NO_QUESTIONS
++        }) + ';';
++        // DEV stations are re-prepared on disk before every launch, so the durable mirror is the ONLY
++        // source of truth. Drop any stale browser save cache here (before app.js loads) so the page can
++        // never resume a previous session's workstream history / provider / model — the exact stale-cache
++        // path that showed old "no model selected" errors over a freshly prepared station.
++        boot += 'try{localStorage.removeItem("starnet.save");}catch(_){}';
++      }
+       boot += '</script>';
+       data = Buffer.from(String(data).replace(/<\/head>/i, boot + '\n</head>'), 'utf8');
+     }
+diff --git a/sidecar/providers/errorClass.js b/sidecar/providers/errorClass.js
+index a862e70d..df3fdc11 100644
+--- a/sidecar/providers/errorClass.js
++++ b/sidecar/providers/errorClass.js
+@@ -255,6 +255,15 @@
+ 
+   function classify400(low, code, ctx) {
+     const c = String(code || '').toLowerCase();
++    /* TRANSIENT SERVER FAULT WEARING A 400 (2026-09-29). Gateways report a server-side hiccup as HTTP 400:
++       OpenCode Go answers `{"error":{"type":"server_error","message":"Upstream request failed: Model is
++       unavailable."}}` with status 400. Every other rule below reads that as a malformed REQUEST and returns
++       format_error — retryable:false, shouldFallback:false — so a transient blip killed a whole run instead of
++       retrying or failing over to the fallback chain. A body that NAMES a server fault (type server_error, an
++       upstream-request failure, a model temporarily unavailable) is the provider's server failing, not our
++       request, so it is classified exactly like a 5xx. Checked first: a genuine format error never carries it. */
++    if (/server[_ ]?error|upstream request failed|model is unavailable|temporarily unavailable|service unavailable|internal server error/.test(low)
++      || /server[_ ]?error/.test(c)) return 'server_error';
+     if (REJECTED_KEY_RE.test(low)) return 'auth';
+     if (/context_length|context_window|max.*token/.test(c)) return 'context_overflow';
+     if (/content_policy|moderation/.test(c)) return 'content_policy_blocked';
+diff --git a/sidecar/providers/factory.js b/sidecar/providers/factory.js
+index c33bcfd8..1b6b7472 100644
+--- a/sidecar/providers/factory.js
++++ b/sidecar/providers/factory.js
+@@ -11,14 +11,15 @@
+       require('./openai-compatible.js'),
+       require('./anthropic.js'),
+       require('./gemini.js'),
++      require('./responses.js'),
+       require('./registry.js')
+     );
+   } else {
+     root.SK = root.SK || {};
+     root.SK.providers = root.SK.providers || {};
+-    root.SK.providers.factory = factory(root.SK.providers.openrouter, root.SK.providers.codex, root.SK.providers.openaiCompatible, root.SK.providers.anthropic, root.SK.providers.gemini, root.SK.providers.registry);
++    root.SK.providers.factory = factory(root.SK.providers.openrouter, root.SK.providers.codex, root.SK.providers.openaiCompatible, root.SK.providers.anthropic, root.SK.providers.gemini, root.SK.providers.responses, root.SK.providers.registry);
+   }
+-})(typeof globalThis !== 'undefined' ? globalThis : this, function (openrouter, codex, openaiCompatible, anthropic, gemini, registry) {
++})(typeof globalThis !== 'undefined' ? globalThis : this, function (openrouter, codex, openaiCompatible, anthropic, gemini, responses, registry) {
+   'use strict';
+ 
+   const PROVIDER_IDS = registry.providerIds();
+@@ -108,6 +109,20 @@
+         reasoningEffort: opts.reasoningEffort
+       });
+     }
++    if (profile.adapter === 'responses') {
++      if (!(opts.baseUrl || profile.baseUrl)) {
++        throw new Error('provider ' + id + ' has no endpoint configured (base URL missing)');
++      }
++      return responses.makeResponsesProvider({
++        fetch: opts.fetch,
++        key: opts.key,
++        baseUrl: opts.baseUrl || profile.baseUrl,
++        responsesPath: profile.responsesPath,
++        modelsPath: profile.modelsPath,
++        reasoningEffort: opts.reasoningEffort,
++        maxOutputTokens: resolveMaxOutputTokens(profile)
++      });
++    }
+     if (profile.adapter === 'openrouter') {
+       return openrouter.makeOpenRouterProvider({
+         fetch: opts.fetch,
+diff --git a/sidecar/providers/provider.js b/sidecar/providers/provider.js
+index 16e20dfc..902c541d 100644
+--- a/sidecar/providers/provider.js
++++ b/sidecar/providers/provider.js
+@@ -408,7 +408,7 @@
+      Never mutates the caller's array or messages. A well-formed transcript with grammar-valid, unique ids
+      returns by IDENTITY, so its request bytes are unchanged. */
+   const ANTHROPIC_TOOL_ID = { re: /^[a-zA-Z0-9_-]{1,64}$/, bad: /[^a-zA-Z0-9_-]/g, max: 64, empty: 'toolu_local' };
+-  const WIRE_TARGETS = { chat: {}, codex: {}, gemini: {}, anthropic: { idGrammar: ANTHROPIC_TOOL_ID } };
++  const WIRE_TARGETS = { chat: {}, codex: {}, responses: {}, gemini: {}, anthropic: { idGrammar: ANTHROPIC_TOOL_ID } };
+ 
+   /* Rewrite call ids into a target's grammar. Deterministic (same transcript -> same ids) and collision-free
+      across the WHOLE request: a valid id that is unique keeps its bytes; an invalid one is rewritten
+diff --git a/sidecar/providers/registry.js b/sidecar/providers/registry.js
+index c062e3bd..fb29e496 100644
+--- a/sidecar/providers/registry.js
++++ b/sidecar/providers/registry.js
+@@ -23,6 +23,38 @@
+   //   connectTimeoutMs — provider-specific response-header ceiling for endpoints whose cold start can
+   //     legitimately exceed the hosted-provider default (local model loading in Ollama).
+   const PROFILES = [
++    {
++      id: 'opencode-go',
++      aliases: ['opencodego'],
++      name: 'OpenCode Go',
++      label: 'OPENCODE GO',
++      endpoint: 'local failover proxy (/v1)',
++      blurb: 'OpenCode Go models via the local failover proxy',
++      live: true,
++      // CHAT/COMPLETIONS, not Responses. The gateway serves each model on ONE protocol: mimo-v2.5,
++      // deepseek-*, kimi-*, glm-* ride chat/completions; only muse-spark/grok-4.6/4.7/gpt-5.6-luna ride
++      // Responses, and minimax/qwen ride Anthropic Messages. Verified live 2026-09-28: sending mimo-v2.5 to
++      // /responses returns 400 "Model does not support this protocol", while /chat/completions returns 200.
++      adapter: 'openai-compatible',
++      apiMode: 'chat_completions',
++      authType: 'api_key',
++      keyRequired: true,
++      keyEnv: ['OPENCODE_GO_API_KEY', 'OPENCODEGO_API_KEY'],
++      modelsRequireAuth: true,
++      baseUrl: '',
++      baseUrlEnv: ['OPENCODE_GO_BASE_URL', 'OPENCODEGO_BASE_URL'],
++      modelsPath: '/models',
++      requiresBaseUrl: true,
++      defaultReasoningEffort: 'medium',
++      unmetered: false,
++      credentialPool: true,
++      supportsTools: null,
++      supportsReasoning: null,
++      maxOutputTokens: 8192,
++      maxOutputTokensEnv: 'STARNET_RESPONSES_MAX_TOKENS',
++      connectTimeoutMs: 300000,
++      order: 16
++    },
+     {
+       id: 'openrouter',
+       aliases: ['or'],
+diff --git a/sidecar/run-journal.js b/sidecar/run-journal.js
+index 78149dc4..0fd17762 100644
+--- a/sidecar/run-journal.js
++++ b/sidecar/run-journal.js
+@@ -136,7 +136,13 @@ function makeFsIo(opts) {
+     const target = file(runId);
+     let fd = null;
+     try {
+-      fd = fs.openSync(target, fresh ? 'wx' : 'a');
++      try {
++        fd = fs.openSync(target, fresh ? 'wx' : 'a');
++      } catch (e) {
++        if (!e || e.code !== 'ENOENT' || typeof fs.mkdirSync !== 'function') throw e;
++        fs.mkdirSync(dir, { recursive: true });
++        fd = fs.openSync(target, fresh ? 'wx' : 'a');
++      }
+       writeAll(fs, fd, line + '\n');
+       fs.fsyncSync(fd);
+     } finally {
+diff --git a/sidecar/tools/builtin/orchestration.js b/sidecar/tools/builtin/orchestration.js
+index a84106f6..425fa5b7 100644
+--- a/sidecar/tools/builtin/orchestration.js
++++ b/sidecar/tools/builtin/orchestration.js
+@@ -36,7 +36,11 @@
+   // 'deliverable' forwards too (2026-07-07 escape): a worker's saved image/file was INVISIBLE — no COMMS card,
+   // no crate, no notify — because the event died here. The payload already carries the OWNING agentId and its
+   // jail-relative path, and the frontend card opens /api/file?agent=<owner>, so forwarding is the whole fix.
+-  const FORWARD = { 'agent.run.start': 1, 'agent.run.end': 1, 'agent.run.error': 1, 'agent.cost': 1, 'deliverable': 1 };
++  const FORWARD = { 'agent.run.start': 1, 'agent.run.end': 1, 'agent.run.error': 1, 'agent.cost': 1, 'deliverable': 1, 'agent.tool_call': 1 };
++  // The forwarded tool_call is reduced to IDENTITY ONLY (no argsSummary): it exists so the FLOOR can light the
++  // worker's desk glyph + show its live work bubble ("working: WEB.SEARCH"), not to replay the worker's tool
++  // arguments into the lead's COMMS. Anything that would render prose stays out.
++  const floorToolCall = (p) => ({ agentId: p && p.agentId, runId: p && p.runId, callId: p && p.callId, name: p && p.name });
+   // a delegated worker's added kit, on top of the autonomous full office (compute/web/files/memory/studio/jukebox):
+   // the WORKBENCH (terminal). Paired with the SHARED lead consent broker, shell/writes follow the lead's APPROVAL
+   // posture — so a worker has the same reach as the orchestrator, gated by the same approvals.
+@@ -570,7 +574,11 @@
+         const overflowNote = overflow.length ? ' — ' + overflow.length + ' NOT dispatched (max ' + maxWorkers + ' per call; dispatch the rest in a follow-up call)' : '';
+ 
+         // forward ONLY lifecycle/cost from children onto the lead's bus (the floor animation reads agent.run.start).
+-        const childEmit = (name, payload) => { if (FORWARD[name] && ctx && typeof ctx.emit === 'function') { try { ctx.emit(name, payload); } catch (_) {} } };
++        // agent.tool_call rides along IDENTITY-ONLY so the floor shows WHAT a working crew member is doing.
++        const childEmit = (name, payload) => {
++          if (!FORWARD[name] || !ctx || typeof ctx.emit !== 'function') return;
++          try { ctx.emit(name, name === 'agent.tool_call' ? floorToolCall(payload) : payload); } catch (_) {}
++        };
+ 
+         // validate every target up front: a real, live, OTHER worker (never self, never an unknown agentId).
+         const jobs = reqs.map(w => {
+@@ -889,7 +897,10 @@
+ 
+         // forward ONLY lifecycle/cost onto the lead's bus so the floor materializes/pops the Meeseeks live; the
+         // durable record (via h.emit) keeps the full watch tail for team.subagents/interrupt/resume.
+-        const childEmit = (name, payload) => { if (FORWARD[name] && ctx && typeof ctx.emit === 'function') { try { ctx.emit(name, payload); } catch (_) {} } };
++        const childEmit = (name, payload) => {
++          if (!FORWARD[name] || !ctx || typeof ctx.emit !== 'function') return;
++          try { ctx.emit(name, name === 'agent.tool_call' ? floorToolCall(payload) : payload); } catch (_) {}
++        };
+ 
+         const spawnOne = (task, i) => {
+           const label = task.label;

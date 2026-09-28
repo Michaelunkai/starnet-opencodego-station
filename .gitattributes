@@ -1,0 +1,9 @@
+# A unified diff legitimately contains context lines that begin with a single space (which reads
+# as trailing whitespace). patches/starnet-opencodego.patch is a byte-exact `git diff --output`
+# capture and must never be rewritten, so disable whitespace checks for patch files AND keep its
+# line endings byte-exact (no CRLF conversion on checkout) so `git apply` works everywhere.
+*.patch -whitespace -text
+
+# Images are binary.
+*.png binary
+*.jpg binary

@@ -1,0 +1,33 @@
+# secrets / credentials - never commit
+*.key
+*.pem
+api.txt
+opencode-go-keys.txt
+.secrets/
+.env
+.env.*
+
+# node
+node_modules/
+npm-debug.log*
+
+# logs / runtime state
+*.log
+*.out.log
+*.err.log
+.spend-pending/
+.run-journal/
+runs.jsonl
+agent.save.json
+agent.roster.json
+
+# os / editor
+Thumbs.db
+desktop.ini
+.DS_Store
+.vscode/
+.idea/
+
+# local scratch
+tmp/
+temp/
