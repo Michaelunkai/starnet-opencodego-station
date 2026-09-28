@@ -13,6 +13,8 @@ in Chrome, all on one machine.
 
 > **Deployment URL:** this project runs locally and is **not** deployed to the public internet. The live URL is
 > the local station: `http://127.0.0.1:8787`. There is no hosted/public URL.
+>
+> **Source:** https://github.com/Michaelunkai/starnet-opencodego-station
 
 ---
 
