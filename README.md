@@ -71,15 +71,23 @@ config (listen prefix + local bearer + upstream keys).
 
 ![Features](assets/features.png)
 
-1. Verifies the proxy `/health`, then keeps it under a **self-healing scheduled task** (`StarNet-OpenCodeGoProxy`).
-2. Validates the model against the live proxy catalog.
-3. Performs a **clean restart** of the sidecar, clears stale spend receipts, and seeds the station
+1. **Resolves paths itself** — runs from the StarNet repo root *or* from `<project>\scripts\` (auto-detects the
+   checkout; override with `-Repo`).
+2. Verifies the proxy `/health`, then keeps it under a **self-healing scheduled task** (`StarNet-OpenCodeGoProxy`).
+3. Validates the model against the live proxy catalog.
+4. **Frees the port first** — stops the task, kills the sidecar's node, and kills *whatever* holds the port, then
+   waits (bounded) until it is actually free. The station can never fail to bind behind a stale listener.
+5. Performs a **clean restart**, clears stale spend receipts, and seeds the station
    (`prepare-opencodego-station.js`) with the hero + 7 specialists on `mimo-v2.5` / `opencode-go`, `approvalMode=full`.
-4. Starts the sidecar under a **S4U scheduled task** (`StarNet-OpenCodeGo`) — session 0, no console — with a
-   supervisor loop so the station self-heals at both levels.
-5. Turns on master bypass + no-questions mode.
-6. Creates (and refreshes) the standing **mission routine** and kicks it off immediately, holding the run stream.
-7. Opens Chrome at `http://127.0.0.1:8787`.
+6. Starts the sidecar under a **S4U scheduled task** (`StarNet-OpenCodeGo`) — session 0, no console — with a
+   2-second supervisor loop so the station self-heals at both levels.
+7. Turns on master bypass + no-questions mode, and sets full-crew concurrency.
+8. Creates (and refreshes) the standing **mission routine** and kicks it off immediately, detached.
+9. **Never hangs** — every wait is bounded and prints progress; a failure dumps the logs and exits with a reason.
+10. Opens Chrome at `http://127.0.0.1:8787` while the mission is running, then prints the summary.
+
+Verified end to end: the mission dispatches the **whole crew in parallel** — a live run shows
+`agent, researcher, scout, analyst, foreman, engineer, writer, operator` all working at once.
 
 ---
 

@@ -253,7 +253,7 @@ index 6e497950..7390c42c 100644
            // fresh newId() already in scope — determinism-clean). Without it the reply is buffered into `state.buf`
            // and only an outcome enum escapes, so the actual work is invisible: it persists under the 'global'
 diff --git a/sidecar/index.js b/sidecar/index.js
-index 05744537..80266a05 100644
+index 05744537..498f8355 100644
 --- a/sidecar/index.js
 +++ b/sidecar/index.js
 @@ -3168,6 +3168,12 @@ async function runSkillCurator(o) {
@@ -280,7 +280,24 @@ index 05744537..80266a05 100644
        // LINE WATCH: the row records the bay + line this Run Now's crate named (placeCronWorkitem above)
        lineId: (cronItems.get(runId) || {}).lineId || undefined, dockId: (cronItems.get(runId) || {}).dockId || undefined,
        reflect: true,   // Run Now must match the scheduled fire's posture exactly, memory included (see the reflect note on /api/run)
-@@ -18262,7 +18272,10 @@ async function runOnceCore(o) {
+@@ -16184,9 +16194,13 @@ async function runOnce(o) {
+ const hostLiveRuns = new Map();   // runId -> { agentId, startedAt, source }
+ async function runOnceTracked(o) {
+   const rid = o && o.runId ? String(o.runId) : '';
+-  // LINE work only (a run the host stamped with its line or bay): harness self-talk and plain chats keep their own
+-  // registries — this map exists so a bay lamp is never stood down while its run is really working
+-  if (!rid || hostLiveRuns.has(rid) || !(o.lineId || o.dockId) || o.internal || o.outputOnly) return runOnceCore(o);
++  /* EVERY REAL RUN THE HOST DRIVES IS A LIVE RUN (2026-09-29). This used to register LINE/bay runs only, so a
++     DELEGATED worker (team.dispatch -> runOnce with no lineId/dockId) was absent from GET /api/state/snapshot.
++     The floor's reconcile drops any agent the snapshot omits, so an SSE reconnect mid-mission extinguished every
++     working crew member's pose for the rest of the run — the exact "watch the whole crew work" case. Register
++     every admitted non-internal, non-outputOnly run so the snapshot is honest and a reconnect restores the crew.
++     Harness self-talk (o.internal) and the structured-output repair pass (o.outputOnly) stay OUT, as before. */
++  if (!rid || hostLiveRuns.has(rid) || o.internal || o.outputOnly) return runOnceCore(o);
+   hostLiveRuns.set(rid, { agentId: String((o && o.agentId) || 'agent'), startedAt: Date.now(), source: 'host' });
+   try { return await runOnceCore(o); }
+   finally { hostLiveRuns.delete(rid); }
+@@ -18262,7 +18276,10 @@ async function runOnceCore(o) {
        + (anyTrack ? '\n  A [bracketed] note is that specialist\'s REAL track record on this station — earned from work the '
          + 'Commander rated and runs the harness watched finish. Use it to pick the right worker; it is evidence, not a '
          + 'permission level, and an agent without one is simply new, not worse.' : '');
@@ -292,7 +309,7 @@ index 05744537..80266a05 100644
        + 'Use background:true for watchable long-running spawned workers, then inspect/control them with team.subagents, team.interrupt, and team.resume. '
        + 'When a running background worker needs a mid-flight correction or new information, use team.steer (pass the id and generation from team.subagents) instead of interrupting and restarting it.';
      // Class Loadouts S1: the class list here is composed from the SHARED catalog (id + tagline), never hardcoded,
-@@ -18419,7 +18432,7 @@ async function runOnceCore(o) {
+@@ -18419,7 +18436,7 @@ async function runOnceCore(o) {
    // RUN quests bind only through quest.update op:"start" (or a successful named progress tick). Admission cannot
    // infer which of several open objectives this arbitrary task is doing, so it deliberately binds nothing here.
    let taskIntentNote = '';
@@ -301,7 +318,7 @@ index 05744537..80266a05 100644
    // SERVICE KEYS (KEYS tab): advertise the env-var NAMES of the Commander's connected platform keys — value never
    // rides the prompt. TRUTHFUL-TELEMETRY GATE: the block says "available to your shell commands", so it composes
    // ONLY when shell.exec is in THIS run's resolved tool set (same discipline as the quest block above). A user with
-@@ -22727,7 +22740,27 @@ async function serveStatic(req, res) {
+@@ -22727,7 +22744,27 @@ async function serveStatic(req, res) {
        // `hasKey` is the honest half: the page's credential badge assumed a DEV boot meant the host HELD a
        // runtime key for `prov`, so a seeded station with no key at all still rendered "● KEY SAVED". Say
        // whether one actually exists — still no secret crosses, only the boolean.

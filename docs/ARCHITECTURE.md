@@ -39,7 +39,7 @@ Both are read-only and never print key material.
 | `sidecar/providers/errorClass.js` | a server-fault 400 (`type: server_error`, "Model is unavailable") is classified retryable + fallback instead of fatal |
 | `sidecar/providers/responses.js` | *(new file)* generic OpenAI Responses adapter |
 | `sidecar/cron-driver.js` | **crew-aware routines**: a scheduled fire is a `lead`, so the routine agent gets `team.dispatch` (opt out with `STARNET_CRON_LEAD=0`) |
-| `sidecar/index.js` | same for Run Now; provider-aware DEV boot payload; no-questions gating; orchestration note prefers `team.dispatch` over `team.spawn` |
+| `sidecar/index.js` | same for Run Now; provider-aware DEV boot payload; no-questions gating; orchestration note prefers `team.dispatch` over `team.spawn`; **every real host run is registered in `hostLiveRuns`** so delegated workers appear in `GET /api/state/snapshot` and an SSE reconnect no longer drops the crew |
 | `sidecar/tools/builtin/orchestration.js` | worker `agent.tool_call` forwarded **identity-only** so the floor can show each worker's live tool |
 | `sidecar/run-journal.js` | self-heals on `ENOENT` |
 | `frontend/app/world.js` | **live work bubbles**: a persistent per-agent status bubble fed by real events, with a TTL sweep |
