@@ -6,7 +6,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const WORKSPACE = path.join(process.env.LOCALAPPDATA, 'StarNet', 'opencodego', 'workspace');
+const WORKSPACE = process.env.STARNET_WORKSPACES || path.join(process.env.LOCALAPPDATA, 'StarNet', 'opencodego', 'workspace');
 const MODEL     = 'mimo-v2.5';
 const PROV      = 'opencode-go';
 const now       = Date.now();
