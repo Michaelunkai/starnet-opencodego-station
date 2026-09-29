@@ -101,7 +101,7 @@ index 5c14d193..245e7bd5 100644
            // The catalog must describe the SAME endpoint this provider's runs hit: a per-provider base URL rides every
            // run body (harness.js chat), so listing the default endpoint instead showed models — and reasoning dials —
 diff --git a/frontend/app/world.js b/frontend/app/world.js
-index fda9a918..a673f21d 100644
+index fda9a918..57f527d4 100644
 --- a/frontend/app/world.js
 +++ b/frontend/app/world.js
 @@ -1783,6 +1783,8 @@ const World = (() => {
@@ -167,7 +167,7 @@ index fda9a918..a673f21d 100644
      else { b.workUntil = 0; clearCrewAwait(b, null, false); if (b.say && /working/.test(b.say.text || '')) b.say = { text: '', until: 0 }; }
      if (working && crewIsAwaiting(b)) { b.awaitResumeWork = true; b.working = false; b.say = { text: '', until: 0 }; }
      if (working) gripeNoCompute(b);      // G0.7: sat down to work in a computeless room — one honest complaint, then silence
-@@ -9683,6 +9700,78 @@ const World = (() => {
+@@ -9683,6 +9700,88 @@ const World = (() => {
    const TICKER_IDLE_MS = 7000;      // clean frame after 7s of no activity
    // tool-in-flight state for the STRETCH desk glyph: agentId -> { name, callId } while a tool_call is open.
    const glyphByAgent = new Map();
@@ -203,7 +203,17 @@ index fda9a918..a673f21d 100644
 +    const cur = liveStatusByAgent.get(id);
 +    const now = (typeof performance !== 'undefined') ? performance.now() : fnow;
 +    if (cur && cur.text && cur.until > now) return;
-+    setLiveStatus(id, 'working: Reading the task');
++    const SEED = {
++      agent: 'Analyzing mission and dispatching crew',
++      researcher: 'Researching the task domain',
++      analyst: 'Creating specs and acceptance criteria',
++      engineer: 'Building the solution',
++      writer: 'Writing documentation',
++      scout: 'Surveying existing solutions',
++      operator: 'Setting up deployment',
++      foreman: 'Tracking mission progress'
++    };
++    setLiveStatus(id, 'working: ' + (SEED[id] || 'Starting work'));
 +  }
 +  /* PLAIN-ENGLISH WORK DESCRIPTIONS. The Commander asked to ALWAYS know, in words, what each working agent is
 +     doing — never a bare tool id. This maps a tool name (plus its clipped args when the caller shipped them) to a
@@ -246,7 +256,7 @@ index fda9a918..a673f21d 100644
  
    // codename for an agentId (hero or crew body), else a short id fallback — never throws.
    function tickerName(aid) {
-@@ -9833,13 +9922,30 @@ const World = (() => {
+@@ -9833,13 +9932,30 @@ const World = (() => {
      });
      // ── STRETCH: desk work-glyph state — a tool in flight (tool_call → its tool_result) marks the agent;
      //    the render pass (drawWorkGlyphs) draws a tiny tag at that desk. run.end clears any stale mark. ──
@@ -263,7 +273,7 @@ index fda9a918..a673f21d 100644
        const g = glyphByAgent.get(p.agentId);
        if (g && (!p.callId || !g.callId || g.callId === p.callId)) glyphByAgent.delete(p.agentId);
 +      // the tool finished and the model is reading its output: say so (specific, never a bare "working…").
-+      if (liveStatusByAgent.has(String(p.agentId))) setLiveStatus(p.agentId, 'working: Reading the result');
++      if (liveStatusByAgent.has(String(p.agentId))) setLiveStatus(p.agentId, 'working: Processing results');
      });
 -    U.bus.on('agent.run.end', p => { if (p && p.agentId) glyphByAgent.delete(p.agentId); });
 +    // A run ENDING does not necessarily mean the AGENT stopped: several runs can share one agentId (two hero
@@ -279,7 +289,7 @@ index fda9a918..a673f21d 100644
      U.bus.on('workitem.placed', p => intakeMessage(p));
      // LINE WATCH: the bay lamps + crate cards fold the same run/crate events the floor animates (linewatch.js)
      for (const n of ['workitem.placed', 'workitem.superseded', 'agent.run.start', 'agent.cost', 'agent.run.error', 'agent.run.end']) U.bus.on(n, p => watchEvent(n, p));
-@@ -9932,7 +10038,13 @@ const World = (() => {
+@@ -9932,7 +10048,13 @@ const World = (() => {
      // construction server-initiated (schedule/event/nightshift today) and takes the pose — the old
      // schedule|event whitelist silently dropped trigger 'nightshift', so a self-initiated task ran while the
      // body wandered idle (2026-07-18: the app asserting idle over a provably live run).
@@ -294,7 +304,7 @@ index fda9a918..a673f21d 100644
      U.bus.on('agent.run.end', p => { if (p && p.agentId && !noteRunEnd(p.agentId, p.runId) && serverLit.has(p.agentId)) { serverLit.delete(p.agentId); setActivityFor(p.agentId, 'idle'); } });
      // M-mem.4 → notification diet (2026-08-18): auto-compaction no longer toasts — it is loop plumbing,
      // not news. The bottom-bar CTX gauge still flashes its mint "compacted" echo (StationUI listens to
-@@ -10574,6 +10686,7 @@ const World = (() => {
+@@ -10574,6 +10696,7 @@ const World = (() => {
        if (level != null && !(b.say && b.say.text && b.say.until > now)) b.say = { text: 'LEVEL ' + level, until: now + 2600 };
      },
      // read-only introspection for live verification of idle behavior (no side effects)
