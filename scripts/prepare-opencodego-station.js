@@ -45,11 +45,16 @@ const team = [
 const savePath = path.join(WORKSPACE, 'agent.save.json');
 if (!fs.existsSync(savePath)) {
   fs.mkdirSync(WORKSPACE, { recursive: true });
-  fs.writeFileSync(savePath, JSON.stringify({ doc: { agent: {}, agents: [], workstreams: [], _saveRevision: 0 }, updatedAt: 0, savedAt: 0 }, null, 2));
+  fs.writeFileSync(savePath, JSON.stringify({ doc: { schema: 'starnet.save', version: 6, agent: {}, agents: [], workstreams: [], _saveRevision: 0 }, updatedAt: 0, savedAt: 0 }, null, 2));
 }
 const save = JSON.parse(fs.readFileSync(savePath, 'utf8'));
 
 // ---- hero ----
+// SCHEMA STAMP (CRITICAL): the frontend's Save.load()/isSave() REJECTS any doc without
+// `schema: 'starnet.save'` + `agent`, so a save written without it makes the browser show
+// "STATION DATA UNREACHABLE" over a perfectly healthy sidecar. Stamp it here, always.
+save.doc.schema = 'starnet.save';
+if (!Number.isFinite(Number(save.doc.version)) || Number(save.doc.version) < 1) save.doc.version = 6;
 save.doc.prov           = PROV;
 save.doc.agent.model    = MODEL;
 save.doc.agent.provider = PROV;
