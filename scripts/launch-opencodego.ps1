@@ -237,10 +237,10 @@ try {
 $persisted = 0
 try { $list = Invoke-RestMethod -Uri ($Url + 'api/cron') -Headers $H -TimeoutSec 15; $persisted = @($list.jobs | Where-Object { $_.name -eq 'MISSION: NOVA' }).Count } catch {}
 if ($persisted -ge 1) { Step "mission: NOVA routine ready" } else { Warn "NOVA routine not persisted" }
-# 12. FIRE ALL 8 IN PARALLEL
+# 12. FIRE NOVA
 if ($Kickoff -and (Test-Path -LiteralPath $Kickoff)) {
-  foreach ($r in $Roles) {
-    try {
+  try {
+    $cmdline = ('powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $Kickoff + '" -JobName "MISSION: NOVA"')
       $cmdline = ('powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $Kickoff + '" -JobName "MISSION: ' + $r.name + '"')
       $spawn = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $cmdline; CurrentDirectory = $Repo }
       if ($spawn.ReturnValue -ne 0) { Warn ("kickoff " + $r.name + " failed") }
