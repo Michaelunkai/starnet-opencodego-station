@@ -69,7 +69,7 @@ if (-not $ProxyDir) {
 $ProxyConfig = if ($ProxyDir) { Join-Path $ProxyDir 'config.json' } else { $null }
 # Prefer the newest hardened build; fall back to the plain name only.
 $ProxyExe = if ($ProxyDir) {
-  @('OpencodeGoProxy_v5.exe','OpencodeGoProxy_v4.exe','OpencodeGoProxy_v3.exe','OpencodeGoProxy_v2.exe','OpencodeGoProxy.exe') |
+  @('OpencodeGoProxy_v7.exe','OpencodeGoProxy_v6.exe','OpencodeGoProxy_v5.exe','OpencodeGoProxy_v4.exe','OpencodeGoProxy_v3.exe','OpencodeGoProxy_v2.exe','OpencodeGoProxy.exe') |
     ForEach-Object { Join-Path $ProxyDir $_ } | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
 } else { $null }
 $StateDir = 'F:\study\Windows\Applications\PowerShell\Automation\OpenCode\State\StarNet\opencodego'
@@ -221,7 +221,7 @@ $Roles = @(
   @{ id = 'operator';   name = 'OPERATOR';   job = 'EXCLUSIVE SLICE: deployment only. Create launch steps/scripts so the result runs on demand. Do NOT build the artifact or write the README. Save scripts to YOUR workspace.' },
   @{ id = 'foreman';    name = 'FOREMAN';    job = 'EXCLUSIVE SLICE: tracking only. Track all workstreams, report live status, what is left, blockers. Do NOT do the work itself. Save status to YOUR workspace.' }
 )
-$novaLead = "You are NOVA, the team leader. YOUR FIRST ACTION in your FIRST response MUST be 7 team_dispatch calls IN PARALLEL, one to EACH of: researcher, analyst, engineer, writer, scout, operator, foreman. Give each a specific subtask with acceptance criteria and save location. Do NOT do their work yourself. After dispatching, monitor, re-dispatch on failure, VERIFY every deliverable against the original task, and report progress in chat every step. Never stop until EVERYTHING is complete and verified."
+'$novaLead = "You are NOVA, the team leader. YOUR FIRST ACTION in your FIRST response MUST be ONE team_dispatch call covering ALL 7 specialists (scout, researcher, analyst, engineer, writer, operator, foreman) with parallel:true. Give each a specific subtask with acceptance criteria. Do NOT pass resultSchema on workers - plain text results are accepted this way. Do NOT call shell_exec, fs_write, fs_read or fs_edit yourself - NOVA ORCHESTRATES, it does not build. After dispatching: monitor, re-dispatch any worker that returns invalid-result or refused with a simpler prompt, VERIFY each deliverable against the original task, and report every worker completion in chat. Never stop until EVERYTHING is complete and verified."'
 $canonical = $Roles | ForEach-Object { 'MISSION: ' + $_.name }
 try {
   try {
