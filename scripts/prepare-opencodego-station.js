@@ -41,8 +41,12 @@ const team = [
   crew('operator',   'OPERATOR',   'Automator',        'Run routine and scheduled work idempotently and log exactly what was done.')
 ];
 
-// ---- read existing save ----
+// ---- read existing save (create skeleton on first boot) ----
 const savePath = path.join(WORKSPACE, 'agent.save.json');
+if (!fs.existsSync(savePath)) {
+  fs.mkdirSync(WORKSPACE, { recursive: true });
+  fs.writeFileSync(savePath, JSON.stringify({ doc: { agent: {}, agents: [], workstreams: [], _saveRevision: 0 }, updatedAt: 0, savedAt: 0 }, null, 2));
+}
 const save = JSON.parse(fs.readFileSync(savePath, 'utf8'));
 
 // ---- hero ----

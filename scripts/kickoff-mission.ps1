@@ -8,7 +8,7 @@
 param(
   [int]$Port = 8787,
   [string]$JobName = 'MISSION: Time Management App',
-  [int]$MaxMinutes = 240
+  [int]$MaxMinutes = 1440   # 24h: a long mission must never be cancelled by the client's stream dropping
 )
 $ErrorActionPreference = 'Stop'
 $Base = "http://127.0.0.1:$Port"
