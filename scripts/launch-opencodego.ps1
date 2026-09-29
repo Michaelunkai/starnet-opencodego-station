@@ -160,6 +160,7 @@ Step "port $Port clear"
 
 # 7. PREPARE STATION
 Step 'preparing station...'
+$env:STARNET_WORKSPACES = $Workspace
 node $Prepare
 if ($LASTEXITCODE -ne 0) { Fail "prepare failed" }
 
