@@ -55,6 +55,12 @@ const save = JSON.parse(fs.readFileSync(savePath, 'utf8'));
 // "STATION DATA UNREACHABLE" over a perfectly healthy sidecar. Stamp it here, always.
 save.doc.schema = 'starnet.save';
 if (!Number.isFinite(Number(save.doc.version)) || Number(save.doc.version) < 1) save.doc.version = 6;
+// HERO IDENTITY (CRITICAL): the app resolves the hero by agent.id/name. A save whose agent has neither
+// yields a null current agent -> the world never spawns -> a blank canvas ("I cannot see shit").
+save.doc.agent.id     = 'agent';
+save.doc.agent.name   = save.doc.agent.name || 'NOVA';
+save.doc.agent.color  = save.doc.agent.color || '#5ad0ff';
+save.doc.agent.skin   = save.doc.agent.skin || 'default';
 save.doc.prov           = PROV;
 save.doc.agent.model    = MODEL;
 save.doc.agent.provider = PROV;
