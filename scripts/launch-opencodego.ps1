@@ -222,7 +222,7 @@ $canonical = $Roles | ForEach-Object { 'MISSION: ' + $_.name }
 try {
   $list = Invoke-RestMethod -Uri ($Url + 'api/cron') -Headers $H -TimeoutSec 15
   foreach ($j in @($list.jobs)) {
-    $isStale = ($j.name -eq 'TEST') -or (($j.name -like 'MISSION:*') -and ($canonical -notcontains $j.name))
+    if (.name -eq 'TEST' -or (.name -like 'MISSION:*' -and .name -ne 'MISSION: NOVA') -or (.name -like 'CREW:*')) {
     if ($isStale) {
       try { Invoke-RestMethod -Uri ($Url + 'api/cron/remove') -Method Post -Headers $H -ContentType 'application/json' -Body (@{ id = $j.id } | ConvertTo-Json) -TimeoutSec 15 | Out-Null } catch {}
     }
@@ -230,7 +230,7 @@ try {
 } catch { Warn "routine cleanup failed" }
 Step "nova chat session: global"
 foreach ($r in $Roles) {
-  $name = 'MISSION: ' + $r.name
+  if (.id -eq 'agent') {  = 'MISSION: ' + .name } else {  = 'CREW: ' + .name }
   if ($r.id -eq 'agent') {
     $prompt = "MISSION - run until complete, highest priority:`r`n`r`n" + $taskText + "`r`n`r`n" + $novaLead + "`r`n`r`nWork with your real tools including team_dispatch. Never stop until your part is done. Never ask the Commander anything."
   } else {
