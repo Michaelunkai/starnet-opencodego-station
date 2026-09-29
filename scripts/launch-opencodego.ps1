@@ -240,15 +240,15 @@ if ($persisted -ge 1) { Step "mission: NOVA routine ready" } else { Warn "NOVA r
 # 12. FIRE NOVA
 if ($Kickoff -and (Test-Path -LiteralPath $Kickoff)) {
   try {
+# 12. FIRE NOVA
+if ($Kickoff -and (Test-Path -LiteralPath $Kickoff)) {
+  try {
     $cmdline = ('powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $Kickoff + '" -JobName "MISSION: NOVA"')
-      $cmdline = ('powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $Kickoff + '" -JobName "MISSION: ' + $r.name + '"')
-      $spawn = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $cmdline; CurrentDirectory = $Repo }
-      if ($spawn.ReturnValue -ne 0) { Warn ("kickoff " + $r.name + " failed") }
-    } catch { Warn ("kickoff " + $r.name + " failed") }
-  }
-  Step 'all 8 agents fired in parallel'
+    $spawn = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $cmdline; CurrentDirectory = $Repo }
+    if ($spawn.ReturnValue -ne 0) { Warn "NOVA kickoff failed" }
+  } catch { Warn "NOVA kickoff failed" }
+  Step 'NOVA fired'
 }
-# 13. WAIT FOR PARALLEL CREW (need 5+ distinct agents to prove true parallelism)
 Step "waiting for agents (up to ${CrewWaitSec}s)..."
 $dl = (Get-Date).AddSeconds($CrewWaitSec); $lastLive = ''
 while ((Get-Date) -lt $dl) {
