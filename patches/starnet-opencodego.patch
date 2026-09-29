@@ -317,7 +317,7 @@ index da269e31..f9213c7b 100644
                  <button class="prov" data-prov="anthropic" aria-pressed="false">ANTHROPIC</button>
                  <button class="prov" data-prov="gemini" aria-pressed="false">GEMINI</button>
 diff --git a/sidecar/cron-driver.js b/sidecar/cron-driver.js
-index 6e497950..7390c42c 100644
+index 6e497950..c74bdf44 100644
 --- a/sidecar/cron-driver.js
 +++ b/sidecar/cron-driver.js
 @@ -64,6 +64,14 @@
@@ -335,7 +335,7 @@ index 6e497950..7390c42c 100644
    const iso = cron._internals.iso;   // ms(arg) -> ISO; deterministic (the lint bans only the zero-arg new Date)
    // B4 redacted-egress: the SAME structural redaction the channel tee applies, so both autonomous lanes
    // (routed messages + scheduled cron) ship one shape to the floor — tool_call name-only, tool_result
-@@ -481,6 +489,9 @@
+@@ -481,13 +489,16 @@
          p = runOnce({
            key: key, model: model, system: system, messages: messages,
            agentId: job.agentId, isTask: true, emit: sink, signal: ac.signal,
@@ -345,8 +345,16 @@ index 6e497950..7390c42c 100644
            // streamId 'cron-'+runId makes this run's transcript durable under a per-RUN named stream (runId is a
            // fresh newId() already in scope — determinism-clean). Without it the reply is buffered into `state.buf`
            // and only an outcome enum escapes, so the actual work is invisible: it persists under the 'global'
+           // stream no UI renders. A PER-RUN id (not per-job) keeps the run's message seed empty (index.js only
+           // reconstructs a stream when messages<=1), so cron behavior is byte-identical — the frontend
+           // autosessions module reads GET /api/transcript?stream=cron-<runId> to surface the output as a session.
+-          runId: runId, streamId: 'cron-' + runId, surface: 'autonomous', trigger: 'schedule', provider: provider,
++          runId: runId, streamId: ((job.origin && (job.origin.streamId || job.origin.sessionId)) ? String(job.origin.streamId || job.origin.sessionId) : ('cron-' + runId)), surface: 'autonomous', trigger: 'schedule', provider: provider,
+           // Host-minted recovery identity. The active-run journal can now tie an interrupted headless run back
+           // to the routine that launched it without trusting model text or guessing from the stream id.
+           cronJobId: job.id, cronJobName: job.name || '',
 diff --git a/sidecar/index.js b/sidecar/index.js
-index 05744537..f1b8e6c6 100644
+index 05744537..3c12bd55 100644
 --- a/sidecar/index.js
 +++ b/sidecar/index.js
 @@ -3168,6 +3168,12 @@ async function runSkillCurator(o) {
@@ -362,10 +370,12 @@ index 05744537..f1b8e6c6 100644
  /* MASTER BYPASS (2026-08-05, the Commander's explicit call) — the runtime "FULL BYPASS" switch behind
     Settings → PERMISSIONS. When ON: every agent, every surface (watched chat, Telegram, routines, night
     shift) skips the consent broker AND gets owner-DM-grade impact reach (shell, media, connectors)
-@@ -13297,6 +13303,10 @@ async function handleCronRun(req, res) {
+@@ -13296,7 +13302,11 @@ async function handleCronRun(req, res) {
+       // under the SAME per-run stream so the frontend cron-session (autosessions.js), which forms off the
        // identical cron.fire/cron.result events, can fetch the real output via /api/transcript?stream=cron-<runId>.
        // Per-run id keeps the seed empty (index.js reconstructs a stream only when messages<=1) — no behavior drift.
-       runId: runId, streamId: 'cron-' + runId, surface: 'autonomous', trigger: 'schedule', provider: provider, broadcast: true,
+-      runId: runId, streamId: 'cron-' + runId, surface: 'autonomous', trigger: 'schedule', provider: provider, broadcast: true,
++      runId: runId, streamId: ((job.origin && (job.origin.streamId || job.origin.sessionId)) ? String(job.origin.streamId || job.origin.sessionId) : ('cron-' + runId)), surface: 'autonomous', trigger: 'schedule', provider: provider, broadcast: true,
 +      // CREW-AWARE ROUTINES (2026-09-29): Run Now must match the scheduled fire's posture EXACTLY, so it is a LEAD
 +      // too (orchestrator object -> team.dispatch) — a routine that runs its crew on schedule must run its crew
 +      // from the button. STARNET_CRON_LEAD=0 restores the old single-agent fire on both paths.

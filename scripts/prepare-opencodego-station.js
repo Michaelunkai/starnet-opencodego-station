@@ -61,6 +61,11 @@ save.doc.agent.id     = 'agent';
 save.doc.agent.name   = save.doc.agent.name || 'NOVA';
 save.doc.agent.color  = save.doc.agent.color || '#5ad0ff';
 save.doc.agent.skin   = save.doc.agent.skin || 'default';
+// ONBOARDED (CRITICAL): app.js gates the "GET ACQUAINTED / awakening" ceremony on agent.onboarded. Without
+// it the station shows onboarding questions instead of the live mission. Mark it done so the app resumes
+// straight into the working station.
+save.doc.agent.onboarded = true;
+if (!save.doc.agent.purpose) save.doc.agent.purpose = 'Command the station crew on behalf of the Commander: take missions, delegate to specialists, monitor progress to completion, and report results.';
 save.doc.prov           = PROV;
 save.doc.agent.model    = MODEL;
 save.doc.agent.provider = PROV;

@@ -1,11 +1,11 @@
-#requires -Version 5.1
-<#  launch-opencodego.ps1  — THE script. Bulletproof edition.
+﻿#requires -Version 5.1
+<#  launch-opencodego.ps1  â€” THE script. Bulletproof edition.
 
     Run it. The station comes up, the ENTIRE crew starts working on your task,
-    and Chrome opens ONLY when everything is already running — so the browser
+    and Chrome opens ONLY when everything is already running â€” so the browser
     shows working agents from the first frame. Never a "STATION DATA UNREACHABLE".
 
-    Task source: ANY file named  a.*  in F:\Downloads (a.md, a.txt, a.md.txt, …).
+    Task source: ANY file named  a.*  in F:\Downloads (a.md, a.txt, a.md.txt, â€¦).
 
     Usage:  powershell -ExecutionPolicy Bypass -File launch-opencodego.ps1
 #>
@@ -62,9 +62,9 @@ function Test-Listen([int]$p) {
   try { return (@(Get-NetTCPConnection -State Listen -LocalPort $p -ErrorAction SilentlyContinue).Count -gt 0) } catch { return $false }
 }
 
-# ═══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 # 1. RESOLVE THE STARNET CHECKOUT
-# ═══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 $candidates = @()
 if ($Repo) { $candidates += $Repo }
 $candidates += @($ScriptDir, (Split-Path -Parent $ScriptDir), 'C:\Users\Admin\StarNet', 'C:\StarNet', (Join-Path $env:USERPROFILE 'StarNet'))
@@ -76,9 +76,9 @@ $Prepare = FirstExisting @((Join-Path $ScriptDir 'prepare-opencodego-station.js'
 $Kickoff = FirstExisting @((Join-Path $ScriptDir 'kickoff-mission.ps1'), (Join-Path $Repo 'kickoff-mission.ps1'))
 if (-not $Prepare) { Fail "prepare-opencodego-station.js not found." }
 
-# ═══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 # 2. RESOLVE THE PROXY
-# ═══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 if (-not $ProxyDir) {
   $ProxyDir = FirstExisting @(
     'F:\study\repos\aiml\AI_and_Machine_Learning\Artificial_Intelligence\cli\opencode\OpencodeGoProxy',
@@ -91,9 +91,9 @@ $Workspace = Join-Path $StateDir 'workspace'
 $OutLog = Join-Path $StateDir 'sidecar.out.log'
 $ErrLog = Join-Path $StateDir 'sidecar.err.log'
 
-# STABLE API TOKEN — THE fix for "STATION DATA UNREACHABLE / SAVE-NET". The sidecar mints a RANDOM token per
+# STABLE API TOKEN â€” THE fix for "STATION DATA UNREACHABLE / SAVE-NET". The sidecar mints a RANDOM token per
 # launch unless STARNET_API_TOKEN is set, so a browser page loaded before a sidecar restart holds a token the
-# NEW sidecar rejects — the page can never reconnect (its retry re-uses the dead token). Persist one token and
+# NEW sidecar rejects â€” the page can never reconnect (its retry re-uses the dead token). Persist one token and
 # reuse it on every launch so any open page survives any restart.
 $TokenFile = Join-Path $StateDir 'api-token.txt'
 $apiToken = ''
@@ -111,9 +111,9 @@ $key = [string]$cfg.local_api_key
 $proxyBase = ([Uri]([string]$cfg.listen_prefix)).GetLeftPart([UriPartial]::Authority).TrimEnd('/')
 $providerBase = $proxyBase + '/v1'
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# 3. FIND THE TASK — ANY file named "a.*" in F:\Downloads
-# ═══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# 3. FIND THE TASK â€” ANY file named "a.*" in F:\Downloads
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 $TaskFile = $null; $taskText = ''
 try {
   $m = Get-ChildItem -LiteralPath 'F:\Downloads' -File -ErrorAction SilentlyContinue |
@@ -124,9 +124,9 @@ try {
   }
 } catch {}
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# 4. TASK TEXT (always populated — fall back to a built-in default mission)
-# ═══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# 4. TASK TEXT (always populated â€” fall back to a built-in default mission)
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 $defaultTask = 'Create, test, and deploy the most useful time-organization and management application you can build, with every genuinely useful feature you can think of.'
 if ($taskText) {
   Step ("task: " + $TaskFile + " (" + $taskText.Length + " chars)")
@@ -136,7 +136,7 @@ if ($taskText) {
   $taskText = $defaultTask
 }
 
-# THE ROLES — one routine per agent, fired IN PARALLEL. Deterministic: every specialist works
+# THE ROLES â€” one routine per agent, fired IN PARALLEL. Deterministic: every specialist works
 # on the task at the same time, no model discretion, no reliance on NOVA remembering to delegate.
 $Roles = @(
   @{ id = 'agent';      name = 'NOVA';       job = 'Coordinate the whole mission. Research the task domain with web_search and produce a prioritized plan/spec with acceptance criteria. Save your spec to your workspace.' },
@@ -149,9 +149,9 @@ $Roles = @(
   @{ id = 'foreman';    name = 'FOREMAN';    job = 'Track this mission as parallel workstreams. Report live status and what is left. Save a plan to your workspace.' }
 )
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# 5. PROXY — healthy + supervised
-# ═══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# 5. PROXY â€” healthy + supervised
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 if (-not (HttpOk ($proxyBase + '/health'))) {
   $starter = Join-Path $ProxyDir 'start_proxy.ps1'
   if ($starter -and (Test-Path -LiteralPath $starter)) { try { & $starter | Out-Null } catch { Warn "proxy starter error" } }
@@ -178,9 +178,9 @@ $models = @($mr.data | ForEach-Object { [string]$_.id })
 if ($models.Count -gt 0 -and $Model -notin $models) { Warn "model '$Model' not in catalog" }
 Step ("brain: OpenCode Go ($($models.Count) models)")
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# 6. CLEAR THE PORT — clean boot, never hang
-# ═══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# 6. CLEAR THE PORT â€” clean boot, never hang
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 Step 'clearing port...'
 try { Stop-ScheduledTask -TaskName 'StarNet-OpenCodeGo' -ErrorAction SilentlyContinue } catch {}
 Stop-SidecarNodes
@@ -189,16 +189,16 @@ $spDir = Join-Path $Workspace '.spend-pending'
 if (Test-Path -LiteralPath $spDir) { Get-ChildItem -LiteralPath $spDir -File -ErrorAction SilentlyContinue | ForEach-Object { try { Remove-Item -LiteralPath $_.FullName -ErrorAction SilentlyContinue } catch {} } }
 Step "port $Port clear"
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# 7. PREPARE STATION — team on disk
-# ═══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# 7. PREPARE STATION â€” team on disk
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 Step 'preparing station...'
 node $Prepare
 if ($LASTEXITCODE -ne 0) { Fail "prepare failed" }
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# 8. SELF-HEALING SIDECAR — never dies
-# ═══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# 8. SELF-HEALING SIDECAR â€” never dies
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 $starter = Join-Path $StateDir 'start-sidecar.cmd'
 $nodeExe = (Get-Command node).Source
 try { [IO.File]::WriteAllText($OutLog, '') } catch {}
@@ -234,9 +234,9 @@ Register-ScheduledTask -TaskName 'StarNet-OpenCodeGo' -Action (New-ScheduledTask
 Step 'starting sidecar...'
 Start-ScheduledTask -TaskName 'StarNet-OpenCodeGo'
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# 9. WAIT FOR FULL READINESS — station answers AND serves the API
-# ═══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# 9. WAIT FOR FULL READINESS â€” station answers AND serves the API
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 $ready = $false; $tok = ''
 $deadline = (Get-Date).AddSeconds($ReadyTimeoutSec)
 while ((Get-Date) -lt $deadline) {
@@ -257,18 +257,18 @@ if (-not $ready) { Fail "station did not become fully ready on $Url" }
 Start-Sleep -Seconds 3   # settle: let the sidecar finish any background boot work
 Step "station ready: $Url"
 
-# ═══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 # 10. MASTER BYPASS
-# ═══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 $H = @{ 'X-StarNet-Token' = $tok }
 try {
   $bp = Invoke-RestMethod -Uri ($Url + 'api/permissions/bypass') -Method Post -Headers $H -ContentType 'application/json' -Body (@{ on = $true } | ConvertTo-Json) -TimeoutSec 10
   Step ("bypass: " + $bp.masterBypass)
 } catch { Warn "bypass failed" }
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# 11. MISSION ROUTINES — ONE PER AGENT (deterministic full-crew parallelism)
-# ═══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# 11. MISSION ROUTINES â€” ONE PER AGENT (deterministic full-crew parallelism)
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 # Never delete-and-recreate a canonical routine (the W6 mint gate declines a name used moments ago).
 # Instead: remove only STALE routines (not one of the 8 canonical names), then PATCH-or-CREATE each role.
 $canonical = $Roles | ForEach-Object { 'MISSION: ' + $_.name }
@@ -282,17 +282,33 @@ try {
   }
 } catch { Warn "routine cleanup failed: $($_.Exception.Message)" }
 
+# NOVA's main chat session (the General stream in the save) â€” every agent's output is delivered HERE so the
+# Commander watches the whole mission in NOVA's chat.
+$novaSession = ''
+try {
+  $sv = Get-Content -LiteralPath (Join-Path $Workspace 'agent.save.json') -Raw | ConvertFrom-Json
+  $ws = @($sv.doc.workstreams) | Where-Object { $_ -and ($_.agentId -eq 'agent') } | Select-Object -First 1
+  if (-not $ws) { $ws = @($sv.doc.workstreams) | Select-Object -First 1 }
+  if ($ws) { $novaSession = [string]$ws.id }
+} catch {}
+if (-not $novaSession) { $novaSession = 'ws_nova_main' }
+Step ("nova chat session: " + $novaSession)
+
 foreach ($r in $Roles) {
   $name = 'MISSION: ' + $r.name
   $prompt = "MISSION - run until complete, highest priority:`r`n`r`n" + $taskText + "`r`n`r`nYOUR ROLE ON THIS MISSION: " + $r.job + "`r`n`r`nWork with your real tools. Save your deliverable to YOUR workspace. Never stop until your part is done. Never ask the Commander anything."
   $existing = $null
   try { $list = Invoke-RestMethod -Uri ($Url + 'api/cron') -Headers $H -TimeoutSec 15; $existing = @($list.jobs | Where-Object { $_.name -eq $name })[0] } catch {}
+  $common = @{
+    prompt = $prompt; enabled = $true; state = 'scheduled'; deliver = 'local'; attachToSession = $true;
+    origin = @{ sessionId = $novaSession; streamId = $novaSession; sessionTitle = 'General' }
+  }
   try {
     if ($existing) {
-      $patch = @{ id = $existing.id; patch = @{ prompt = $prompt; enabled = $true; state = 'scheduled' } } | ConvertTo-Json -Depth 6
+      $patch = @{ id = $existing.id; patch = $common } | ConvertTo-Json -Depth 8
       Invoke-RestMethod -Uri ($Url + 'api/cron/update') -Method Post -Headers $H -ContentType 'application/json' -Body $patch -TimeoutSec 20 | Out-Null
     } else {
-      $body = @{ name = $name; prompt = $prompt; schedule = 'every 15 minutes'; agentId = $r.id } | ConvertTo-Json -Depth 6
+      $body = (@{ name = $name; schedule = 'every 3 minutes'; agentId = $r.id } + $common) | ConvertTo-Json -Depth 8
       $cr = Invoke-RestMethod -Uri ($Url + 'api/cron') -Method Post -Headers $H -ContentType 'application/json' -Body $body -TimeoutSec 20
       if ($cr.declined -and -not $cr.job) { Warn ("routine " + $r.name + " declined by mint gate; will retry on next run") }
     }
@@ -303,9 +319,9 @@ try { $list = Invoke-RestMethod -Uri ($Url + 'api/cron') -Headers $H -TimeoutSec
 if ($persisted -ge $Roles.Count) { Step ("mission: " + $persisted + " agent routines ready + persisted") }
 else { Warn ("mission routines: expected " + $Roles.Count + ", found " + $persisted) }
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# 12. FIRE ALL AGENTS IN PARALLEL — detached, each holds its own stream
-# ═══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# 12. FIRE ALL AGENTS IN PARALLEL â€” detached, each holds its own stream
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 if ($Kickoff -and (Test-Path -LiteralPath $Kickoff)) {
   foreach ($r in $Roles) {
     try {
@@ -317,9 +333,9 @@ if ($Kickoff -and (Test-Path -LiteralPath $Kickoff)) {
   Step 'all 8 agents fired in parallel'
 }
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# 13. WAIT FOR AGENTS TO BE WORKING — BEFORE opening the browser
-# ═══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# 13. WAIT FOR AGENTS TO BE WORKING â€” BEFORE opening the browser
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 Step "waiting for agents to start working (up to ${CrewWaitSec}s)..."
 $dl = (Get-Date).AddSeconds($CrewWaitSec)
 $lastLive = ''
@@ -336,17 +352,17 @@ while ((Get-Date) -lt $dl) {
 }
 if ($lastLive) { Step ("agents working: " + $lastLive) } else { Warn "no agents visible yet - opening browser anyway (mission continues in background)" }
 
-# ═══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 # 14. VERIFY
-# ═══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 try {
   $r = Get-Content -LiteralPath (Join-Path $Workspace 'agent.roster.json') -Raw | ConvertFrom-Json
   Step ("roster: " + ($r.agents | ForEach-Object { $_.agentId }) -join ', ')
 } catch {}
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# 15. FINAL HEALTH RE-CHECK — then open Chrome, when the station is provably healthy
-# ═══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# 15. FINAL HEALTH RE-CHECK â€” then open Chrome, when the station is provably healthy
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 $finalOk = $false
 $dl = (Get-Date).AddSeconds(30)
 while ((Get-Date) -lt $dl) {
