@@ -67,7 +67,11 @@ if (-not $ProxyDir) {
     (Join-Path $ScriptDir 'OpencodeGoProxy'), (Join-Path $Repo 'OpencodeGoProxy'))
 }
 $ProxyConfig = if ($ProxyDir) { Join-Path $ProxyDir 'config.json' } else { $null }
-$ProxyExe = if ($ProxyDir) { Join-Path $ProxyDir 'OpencodeGoProxy.exe' } else { $null }
+# Prefer the newest hardened build; fall back to the plain name only.
+$ProxyExe = if ($ProxyDir) {
+  @('OpencodeGoProxy_v5.exe','OpencodeGoProxy_v4.exe','OpencodeGoProxy_v3.exe','OpencodeGoProxy_v2.exe','OpencodeGoProxy.exe') |
+    ForEach-Object { Join-Path $ProxyDir $_ } | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+} else { $null }
 $StateDir = 'F:\study\Windows\Applications\PowerShell\Automation\OpenCode\State\StarNet\opencodego'
 $Workspace = Join-Path $StateDir 'workspace'
 $OutLog = Join-Path $StateDir 'sidecar.out.log'
@@ -223,7 +227,7 @@ try {
   try {
     $list = Invoke-RestMethod -Uri ($Url + 'api/cron') -Headers $H -TimeoutSec 15
     foreach ($j in @($list.jobs)) {
-      if (.name -eq 'TEST' -or (.name -like 'MISSION:*' -and .name -ne 'MISSION: NOVA')) {
+      if (.name -eq 'TEST' -or (.name -like 'MISSION:*' -and .name -ne 'MISSION: NOVA') -or (.name -like 'DISPATCH-*') -or (.name -like 'CREW:*')) {
         try { Invoke-RestMethod -Uri ($Url + 'api/cron/remove') -Method Post -Headers $H -ContentType 'application/json' -Body (@{ id = $j.id } | ConvertTo-Json) -TimeoutSec 15 | Out-Null } catch {}
       }
     }
