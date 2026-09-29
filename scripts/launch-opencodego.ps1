@@ -235,7 +235,7 @@ try {
 } catch { Warn "NOVA routine failed: $($_.Exception.Message)" }
 $persisted = 0
 try { $list = Invoke-RestMethod -Uri ($Url + 'api/cron') -Headers $H -TimeoutSec 15; $persisted = @($list.jobs | Where-Object { $_.name -eq 'MISSION: NOVA' }).Count } catch {}
-if ($persisted -ge 1) { Step "mission: NOVA routine ready" } else { Warn "NOVA routine not persisted" }
+
 else { Warn ("mission routines: expected " + $Roles.Count + ", found " + $persisted) }
 
 # 13. WAIT FOR PARALLEL CREW (need 5+ distinct agents to prove true parallelism)
