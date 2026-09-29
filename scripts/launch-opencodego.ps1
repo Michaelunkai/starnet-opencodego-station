@@ -223,7 +223,7 @@ try {
   try {
     $list = Invoke-RestMethod -Uri ($Url + 'api/cron') -Headers $H -TimeoutSec 15
     foreach ($j in @($list.jobs)) {
-      if ($j.name -eq 'TEST' -or ($j.name -like 'MISSION:*' -and $j.name -ne 'MISSION: NOVA') -or ($j.name -like 'CREW:*')) {
+      if (.name -eq 'TEST' -or (.name -like 'MISSION:*' -and .name -ne 'MISSION: NOVA')) {
         try { Invoke-RestMethod -Uri ($Url + 'api/cron/remove') -Method Post -Headers $H -ContentType 'application/json' -Body (@{ id = $j.id } | ConvertTo-Json) -TimeoutSec 15 | Out-Null } catch {}
       }
     }
