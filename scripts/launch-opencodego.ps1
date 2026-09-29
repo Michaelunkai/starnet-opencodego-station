@@ -91,6 +91,20 @@ $Workspace = Join-Path $StateDir 'workspace'
 $OutLog = Join-Path $StateDir 'sidecar.out.log'
 $ErrLog = Join-Path $StateDir 'sidecar.err.log'
 
+# STABLE API TOKEN — THE fix for "STATION DATA UNREACHABLE / SAVE-NET". The sidecar mints a RANDOM token per
+# launch unless STARNET_API_TOKEN is set, so a browser page loaded before a sidecar restart holds a token the
+# NEW sidecar rejects — the page can never reconnect (its retry re-uses the dead token). Persist one token and
+# reuse it on every launch so any open page survives any restart.
+$TokenFile = Join-Path $StateDir 'api-token.txt'
+$apiToken = ''
+if (Test-Path -LiteralPath $TokenFile) { try { $apiToken = (Get-Content -LiteralPath $TokenFile -Raw).Trim() } catch { $apiToken = '' } }
+if (-not $apiToken -or $apiToken.Length -lt 32) {
+  $bytes = New-Object byte[] 32
+  [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+  $apiToken = ($bytes | ForEach-Object { $_.ToString('x2') }) -join ''
+  try { [IO.File]::WriteAllText($TokenFile, $apiToken, (New-Object Text.UTF8Encoding($false))) } catch {}
+}
+
 if (-not $ProxyConfig -or -not (Test-Path -LiteralPath $ProxyConfig)) { Fail "OpencodeGoProxy config.json not found. Pass -ProxyDir." }
 $cfg = Get-Content -LiteralPath $ProxyConfig -Raw | ConvertFrom-Json
 $key = [string]$cfg.local_api_key
@@ -203,6 +217,7 @@ $envLines = @(
   'set "STARNET_MAX_CONCURRENT_AGENTS=12"'
   'set "STARNET_MAX_UNPRICED_TOKENS=0"'
   'set "STARNET_UNCAUGHT_KEEP_SERVING=1"'
+  ('set "STARNET_API_TOKEN={0}"' -f $apiToken)
   'set "STARNET_FALLBACK_MODELS=mimo-v2.6-flash,deepseek-v4.1-flash,deepseek-v4-flash"'
   ('set "OPENCODE_GO_API_KEY={0}"' -f $key)
   ('set "OPENCODE_GO_BASE_URL={0}"' -f $providerBase)

@@ -1,5 +1,5 @@
 diff --git a/frontend/app/app.js b/frontend/app/app.js
-index 0f57e03c..892ef52e 100644
+index 0f57e03c..0c294073 100644
 --- a/frontend/app/app.js
 +++ b/frontend/app/app.js
 @@ -385,7 +385,12 @@ const App = (() => {
@@ -42,6 +42,22 @@ index 0f57e03c..892ef52e 100644
      return 'sk-or-...  -  openrouter.ai/keys';
    }
    // Where a NEW user actually GETS a key for this provider — the same destinations the key placeholder
+@@ -4870,6 +4878,15 @@ const App = (() => {
+         try { location.reload(); } catch (_) {}
+         return;
+       }
++      // A REFUSED token (stale window session) can ONLY be fixed by a fresh page load, which re-injects the
++      // current token. Polling forever was a chicken-and-egg that stranded a live station ("STATION DATA
++      // UNREACHABLE" over a healthy sidecar). Reload instead of looping.
++      if (r && r.reason === 'forbidden') {
++        if (timer) clearInterval(timer);
++        setStatus('refreshing session…');
++        try { location.reload(); } catch (_) {}
++        return;
++      }
+       const degraded = await probeDegraded();
+       const unreadable = r.reason === 'unreadable', cacheFailed = r.reason === 'cache';
+       setStatus((degraded ? degraded + ' — ' : unreadable ? 'saved station still unreadable — ' : cacheFailed ? 'local restore still unavailable — ' : 'still unreachable — ') + 'retrying every 5s (attempt ' + attempts + '). Your save is untouched.' + (core || unreadable || cacheFailed ? '' : ' ' + BROWSER_HINT));
 diff --git a/frontend/app/harness.js b/frontend/app/harness.js
 index d1aa94bf..64209af9 100644
 --- a/frontend/app/harness.js
