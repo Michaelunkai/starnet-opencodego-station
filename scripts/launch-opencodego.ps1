@@ -208,60 +208,35 @@ try {
   Step ("bypass: " + $bp.masterBypass)
 } catch { Warn "bypass failed" }
 # 11. MISSION - ALL 8 FIRE IN PARALLEL, NON-OVERLAPPING SLICES, NOVA LEADS
-# NOVA gets the FULL task + orchestration orders. Each specialist gets the FULL task PLUS
-# an EXCLUSIVE slice (only their specialty). NOVA ALSO dispatches refined subtasks via
-# team_dispatch as its FIRST action. No two agents own the same work.
-$Roles = @(
-  @{ id = 'agent';      name = 'NOVA';       job = 'LEADER' },
-  @{ id = 'researcher'; name = 'RESEARCHER'; job = 'EXCLUSIVE SLICE: research only. Use web_search to gather facts, existing solutions, technical options with sources. Do NOT write code, docs, specs, or deployment scripts. Save findings to YOUR workspace.' },
-  @{ id = 'analyst';    name = 'ANALYST';    job = 'EXCLUSIVE SLICE: analysis only. Turn the task into a prioritized spec with concrete acceptance criteria and risks. Do NOT write code, docs, or do web research beyond what is needed. Save spec to YOUR workspace.' },
-  @{ id = 'engineer';   name = 'ENGINEER';   job = 'EXCLUSIVE SLICE: build only. Write code, create files, run them, run tests, fix bugs until it genuinely works. Do NOT write README/docs or deployment runbooks (that is WRITER/OPERATOR). Save every artifact to YOUR workspace.' },
-  @{ id = 'writer';     name = 'WRITER';     job = 'EXCLUSIVE SLICE: documentation only. Write README, usage guide, launch notes. Do NOT write code or do research. Save docs to YOUR workspace.' },
-  @{ id = 'scout';      name = 'SCOUT';      job = 'EXCLUSIVE SLICE: survey only. Find what already exists, compare approaches, name what makes ours different. Do NOT build or write docs. Save report to YOUR workspace.' },
-  @{ id = 'operator';   name = 'OPERATOR';   job = 'EXCLUSIVE SLICE: deployment only. Create launch steps/scripts so the result runs on demand. Do NOT build the artifact or write the README. Save scripts to YOUR workspace.' },
-  @{ id = 'foreman';    name = 'FOREMAN';    job = 'EXCLUSIVE SLICE: tracking only. Track all workstreams, report live status, what is left, blockers. Do NOT do the work itself. Save status to YOUR workspace.' }
-)
-$novaLead = "You are NOVA, the team leader. YOUR FIRST ACTION in your FIRST response MUST be ONE team_dispatch call covering ALL 7 specialists (scout, researcher, analyst, engineer, writer, operator, foreman) with parallel:true. Give each a specific subtask with acceptance criteria. Do NOT pass resultSchema on workers - plain text results are accepted this way. Do NOT call shell_exec, fs_write, fs_read or fs_edit yourself - NOVA ORCHESTRATES, it does not build. After dispatching: monitor, re-dispatch any worker that returns invalid-result or refused with a simpler prompt, VERIFY each deliverable against the original task, and report every worker completion in chat. Never stop until EVERYTHING is complete and verified."
-$canonical = $Roles | ForEach-Object { 'MISSION: ' + $_.name }
-try {
-  try {
-    $list = Invoke-RestMethod -Uri ($Url + 'api/cron') -Headers $H -TimeoutSec 15
-    foreach ($j in @($list.jobs)) {
-      if ($j.name -eq 'TEST' -or ($j.name -like 'MISSION:*' -and $j.name -ne 'MISSION: NOVA') -or (.name -like 'DISPATCH-*') -or ($j.name -like 'CREW:*')) {
-        try { Invoke-RestMethod -Uri ($Url + 'api/cron/remove') -Method Post -Headers $H -ContentType 'application/json' -Body (@{ id = $j.id } | ConvertTo-Json) -TimeoutSec 15 | Out-Null } catch {}
-      }
-    }
-  } catch { Warn "routine cleanup failed" }
-} catch { Warn "routine cleanup failed" }
+# 11. MISSION - NOVA LEADS, CREW FOLLOWS VIA TEAM.DISPATCH
+$novaLead = "You are NOVA, the team leader. YOUR FIRST ACTION in your FIRST response MUST be ONE team_dispatch call covering ALL 7 specialists (scout, researcher, analyst, engineer, writer, operator, foreman) with parallel:true. Give each a specific subtask with acceptance criteria and a specific session name for each. Do NOT pass resultSchema on workers - plain text results are accepted this way. Do NOT call shell_exec, fs_write, fs_read or fs_edit yourself - NOVA ORCHESTRATES, it does not build. After dispatching: monitor, re-dispatch any worker that returns invalid-result or refused with a simpler prompt, VERIFY each deliverable against the original task, and report every worker completion in chat. Never stop until EVERYTHING is complete and verified."
 Step "nova chat session: global"
-foreach ($r in $Roles) {
-  if ($r.id -eq 'agent') { $name = 'MISSION: ' + $r.name } else { $name = 'CREW: ' + $r.name }
-  if ($r.id -eq 'agent') {
-    $prompt = "MISSION - run until complete, highest priority:`r`n`r`n" + $taskText + "`r`n`r`n" + $novaLead + "`r`n`r`nWork with your real tools including team_dispatch. Never stop until your part is done. Never ask the Commander anything."
-  } else {
-    $prompt = "MISSION - run until complete, highest priority:`r`n`r`nFULL TASK:`r`n" + $taskText + "`r`n`r`nYOUR EXCLUSIVE SLICE (do ONLY this): " + $r.job + "`r`n`r`nNOVA is your team leader. If NOVA dispatches you a refined subtask via team_dispatch, that dispatch OVERRIDES this starter slice - follow it exactly. Report specific actions with your tools (file paths, queries, commands) - never generic text. Save your deliverable to YOUR workspace. Never stop until your part is done. Never ask the Commander anything."
-  }
-  $existing = $null
-  try { $list = Invoke-RestMethod -Uri ($Url + 'api/cron') -Headers $H -TimeoutSec 15; $existing = @($list.jobs | Where-Object { $_.name -eq $name })[0] } catch {}
-  $common = @{
-    prompt = $prompt; enabled = $true; state = 'scheduled'; deliver = 'local'; attachToSession = $true;
-    origin = @{ sessionId = 'global'; streamId = 'global'; sessionTitle = 'General' }
-  }
-  try {
-    if ($existing) {
-      $patch = @{ id = $existing.id; patch = $common } | ConvertTo-Json -Depth 8
-      Invoke-RestMethod -Uri ($Url + 'api/cron/update') -Method Post -Headers $H -ContentType 'application/json' -Body $patch -TimeoutSec 20 | Out-Null
-    } else {
-      $body = (@{ name = $name; schedule = 'every 3 minutes'; agentId = $r.id } + $common) | ConvertTo-Json -Depth 8
-      $cr = Invoke-RestMethod -Uri ($Url + 'api/cron') -Method Post -Headers $H -ContentType 'application/json' -Body $body -TimeoutSec 20
-      if ($cr.declined -and -not $cr.job) { Warn ("routine " + $r.name + " declined by mint gate") }
+try {
+  $list = Invoke-RestMethod -Uri ($Url + 'api/cron') -Headers $H -TimeoutSec 15
+  foreach ($j in @($list.jobs)) {
+    if ($j.name -ne 'MISSION: NOVA') {
+      try { Invoke-RestMethod -Uri ($Url + 'api/cron/remove') -Method Post -Headers $H -ContentType 'application/json' -Body (@{ id = $j.id } | ConvertTo-Json) -TimeoutSec 15 | Out-Null } catch {}
     }
-  } catch { Warn ("routine " + $r.name + " failed: " + $_.Exception.Message) }
-}
+  }
+} catch { Warn "routine cleanup failed" }
+$novaTask = (Get-Content -LiteralPath 'F:\Downloads\a.md' -Raw -ErrorAction SilentlyContinue).Trim()
+if (-not $novaTask) { $novaTask = (Get-ChildItem -LiteralPath 'F:\Downloads' -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -match "^a\." } | Sort-Object LastWriteTime -Descending | Select-Object -First 1 | ForEach-Object { (Get-Content -LiteralPath $_.FullName -Raw).Trim() }) }
+if (-not $novaTask) { $novaTask = 'Complete the mission in F:\Downloads.' }
+$novaPrompt = "MISSION - run until complete, highest priority:`r`n`r`n" + $novaTask + "`r`n`r`n" + $novaLead + "`r`n`r`nWork with your real tools including team_dispatch. Never stop until your part is done. Never ask the Commander anything."
+$novaExisting = $null
+try { $list = Invoke-RestMethod -Uri ($Url + 'api/cron') -Headers $H -TimeoutSec 15; $novaExisting = @($list.jobs | Where-Object { $_.name -eq 'MISSION: NOVA' })[0] } catch {}
+$novaCommon = @{ prompt = $novaPrompt; enabled = $true; state = 'scheduled'; deliver = 'local'; attachToSession = $true; origin = @{ sessionId = 'global'; streamId = 'global'; sessionTitle = 'General' } }
+try {
+  if ($novaExisting) {
+    Invoke-RestMethod -Uri ($Url + 'api/cron/update') -Method Post -Headers $H -ContentType 'application/json' -Body (@{ id = $novaExisting.id; patch = $novaCommon } | ConvertTo-Json -Depth 8) -TimeoutSec 20 | Out-Null
+  } else {
+    $cr = Invoke-RestMethod -Uri ($Url + 'api/cron') -Method Post -Headers $H -ContentType 'application/json' -Body ((@{ name = 'MISSION: NOVA'; schedule = 'every 3 minutes'; agentId = 'agent' } + $novaCommon) | ConvertTo-Json -Depth 8) -TimeoutSec 20
+    if ($cr.declined -and -not $cr.job) { Warn "NOVA routine declined" }
+  }
+} catch { Warn "NOVA routine failed: $($_.Exception.Message)" }
 $persisted = 0
-try { $list = Invoke-RestMethod -Uri ($Url + 'api/cron') -Headers $H -TimeoutSec 15; $persisted = @($list.jobs | Where-Object { $_.name -in $canonical }).Count } catch {}
-if ($persisted -ge $Roles.Count) { Step ("mission: " + $persisted + " agent routines ready + persisted") }
-else { Warn ("mission routines: expected " + $Roles.Count + ", found " + $persisted) }
+try { $list = Invoke-RestMethod -Uri ($Url + 'api/cron') -Headers $H -TimeoutSec 15; $persisted = @($list.jobs | Where-Object { $_.name -eq 'MISSION: NOVA' }).Count } catch {}
+if ($persisted -ge 1) { Step "mission: NOVA routine ready" } else { Warn "NOVA routine not persisted" }
 # 12. FIRE ALL 8 IN PARALLEL
 if ($Kickoff -and (Test-Path -LiteralPath $Kickoff)) {
   foreach ($r in $Roles) {
