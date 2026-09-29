@@ -237,16 +237,6 @@ $persisted = 0
 try { $list = Invoke-RestMethod -Uri ($Url + 'api/cron') -Headers $H -TimeoutSec 15; $persisted = @($list.jobs | Where-Object { $_.name -eq 'MISSION: NOVA' }).Count } catch {}
 if ($persisted -ge 1) { Step "mission: NOVA routine ready" } else { Warn "NOVA routine not persisted" }
 else { Warn ("mission routines: expected " + $Roles.Count + ", found " + $persisted) }
-# 12. FIRE ALL 8 IN PARALLEL
-if ($Kickoff -and (Test-Path -LiteralPath $Kickoff)) {
-  foreach ($r in $Roles) {
-    try {
-      $cmdline = ('powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $Kickoff + '" -JobName "MISSION: ' + $r.name + '"')
-      $spawn = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $cmdline; CurrentDirectory = $Repo }
-      if ($spawn.ReturnValue -ne 0) { Warn ("kickoff " + $r.name + " failed") }
-    } catch { Warn ("kickoff " + $r.name + " failed") }
-  }
-  Step 'all 8 agents fired in parallel'
 }
 # 13. WAIT FOR PARALLEL CREW (need 5+ distinct agents to prove true parallelism)
 Step "waiting for agents (up to ${CrewWaitSec}s)..."
