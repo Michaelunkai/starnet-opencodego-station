@@ -221,13 +221,13 @@ $Roles = @(
   @{ id = 'operator';   name = 'OPERATOR';   job = 'EXCLUSIVE SLICE: deployment only. Create launch steps/scripts so the result runs on demand. Do NOT build the artifact or write the README. Save scripts to YOUR workspace.' },
   @{ id = 'foreman';    name = 'FOREMAN';    job = 'EXCLUSIVE SLICE: tracking only. Track all workstreams, report live status, what is left, blockers. Do NOT do the work itself. Save status to YOUR workspace.' }
 )
-'$novaLead = "You are NOVA, the team leader. YOUR FIRST ACTION in your FIRST response MUST be ONE team_dispatch call covering ALL 7 specialists (scout, researcher, analyst, engineer, writer, operator, foreman) with parallel:true. Give each a specific subtask with acceptance criteria. Do NOT pass resultSchema on workers - plain text results are accepted this way. Do NOT call shell_exec, fs_write, fs_read or fs_edit yourself - NOVA ORCHESTRATES, it does not build. After dispatching: monitor, re-dispatch any worker that returns invalid-result or refused with a simpler prompt, VERIFY each deliverable against the original task, and report every worker completion in chat. Never stop until EVERYTHING is complete and verified."'
+$novaLead = "You are NOVA, the team leader. YOUR FIRST ACTION in your FIRST response MUST be ONE team_dispatch call covering ALL 7 specialists (scout, researcher, analyst, engineer, writer, operator, foreman) with parallel:true. Give each a specific subtask with acceptance criteria. Do NOT pass resultSchema on workers - plain text results are accepted this way. Do NOT call shell_exec, fs_write, fs_read or fs_edit yourself - NOVA ORCHESTRATES, it does not build. After dispatching: monitor, re-dispatch any worker that returns invalid-result or refused with a simpler prompt, VERIFY each deliverable against the original task, and report every worker completion in chat. Never stop until EVERYTHING is complete and verified."
 $canonical = $Roles | ForEach-Object { 'MISSION: ' + $_.name }
 try {
   try {
     $list = Invoke-RestMethod -Uri ($Url + 'api/cron') -Headers $H -TimeoutSec 15
     foreach ($j in @($list.jobs)) {
-      if (.name -eq 'TEST' -or (.name -like 'MISSION:*' -and .name -ne 'MISSION: NOVA') -or (.name -like 'DISPATCH-*') -or (.name -like 'CREW:*')) {
+      if ($j.name -eq 'TEST' -or ($j.name -like 'MISSION:*' -and $j.name -ne 'MISSION: NOVA') -or (.name -like 'DISPATCH-*') -or ($j.name -like 'CREW:*')) {
         try { Invoke-RestMethod -Uri ($Url + 'api/cron/remove') -Method Post -Headers $H -ContentType 'application/json' -Body (@{ id = $j.id } | ConvertTo-Json) -TimeoutSec 15 | Out-Null } catch {}
       }
     }
