@@ -298,28 +298,48 @@ try {
 # ----------------------------------------------------------------------------------------------------------
 # 5. STANDING MISSION - create/refresh the routine, then kick it off detached (holds its own stream)
 # ----------------------------------------------------------------------------------------------------------
-$missionPrompt = @'
-MISSION - STANDING CREW OBJECTIVE (highest priority, run until complete):
+# MISSION SOURCE: whatever the Commander puts in the task file wins. The file is re-read on every launch, so
+# editing it and re-running the launcher is the whole workflow. Missing/empty -> the built-in default mission.
+$TaskFile = 'F:\downloads\a.md'
+$CrewDirective = @'
+=== HOW TO RUN THIS (you are NOVA, the coordinator) ===
+You MUST delegate - you are not allowed to do the whole job yourself. The Commander is watching the floor and
+every working agent shows what it is doing live, so keep the crew busy.
 
-Create, test, and deploy the most useful time-organization and management application you can build, with every genuinely useful feature you can think of.
-
-You are NOVA, the coordinator. This is a FULL-CREW operation and you MUST delegate - you are not allowed to do the whole build yourself. The Commander is watching the floor and every working agent shows what it is doing live, so keep the crew busy.
-
-1. In one line, brief the mission.
-2. In your FIRST tool call, dispatch your whole crew IN PARALLEL with team.dispatch (parallel:true, one worker per specialist below, each with a concrete prompt):
-   - researcher: research best-in-class time/task managers and the features people actually need; return a sourced feature list.
+1. In one line, brief the job.
+2. In your FIRST tool call, dispatch your WHOLE crew IN PARALLEL with team.dispatch (parallel:true, one worker per
+   specialist below, each with a concrete prompt).
+   IMPORTANT: do NOT pass a `session` on any worker. This mission runs HEADLESS (a scheduled/Run-Now lead has no
+   station page attached), so a named session CANNOT be resolved and that worker would be REFUSED and never run.
+   Dispatch with parallel:true and NO session so every worker actually runs and reports back to you.
+   The specialists:
+   - researcher: gather the facts and sources this job needs; return a sourced summary.
    - analyst: turn that into a prioritized spec with acceptance criteria.
-   - engineer: build the working app in the station workspace, run it, fix what breaks.
-   - writer: write README + usage docs + a short launch blurb.
-   - scout: check existing tools and name what makes this one different.
-   - operator: create a routine so the app can be launched/served on demand.
-   - foreman: split the build into parallel workstreams, track each worker, report status.
-   Pass those exact agentIds to team.dispatch (the names in parentheses above are the agentIds). Do NOT use team.spawn for this mission: the named crew must do the work so the Commander can watch each of them. If team.dispatch reports a worker as NOT RUN, re-dispatch it in a follow-up call. Do not silently drop a specialist.
+   - engineer: build and fix the working artifact; run it and verify it actually works.
+   - writer: write the README and usage docs.
+   - scout: check what already exists and what makes this different.
+   - operator: make it runnable on demand (routine / launch steps).
+   - foreman: split the build into parallel workstreams and track every worker.
+   Pass those exact agentIds (the names above ARE the agentIds). Do NOT use team.spawn. If team.dispatch reports a
+   worker as NOT RUN, re-dispatch it in a follow-up call - never silently drop a specialist.
 3. Monitor every worker with team.subagents; steer or re-dispatch anything stalled.
-4. Keep going until the app is built, tested, and runnable. Finish with the exact path and the launch command.
+4. Keep going until the job is done to PERFECTION. Finish with the exact path and the launch command.
 
 Never ask the Commander anything. Decide, act, finish.
 '@
+
+$taskText = ''
+if (Test-Path -LiteralPath $TaskFile) {
+  try { $taskText = (Get-Content -LiteralPath $TaskFile -Raw).Trim() } catch { $taskText = '' }
+}
+if ($taskText) {
+  Step ("mission source: " + $TaskFile + " (" + $taskText.Length + " chars)")
+  $missionPrompt = "MISSION - STANDING CREW OBJECTIVE (highest priority, run until complete):`r`n`r`n" + $taskText + "`r`n`r`n" + $CrewDirective
+} else {
+  if (Test-Path -LiteralPath $TaskFile) { Warn "task file is empty - using the built-in default mission" }
+  else { Warn "task file not found ($TaskFile) - using the built-in default mission" }
+  $missionPrompt = "MISSION - STANDING CREW OBJECTIVE (highest priority, run until complete):`r`n`r`nCreate, test, and deploy the most useful time-organization and management application you can build, with every genuinely useful feature you can think of.`r`n`r`n" + $CrewDirective
+}
 try {
   $routineBody = @{ name = 'MISSION: Time Management App'; prompt = $missionPrompt; schedule = 'every 15 minutes'; agentId = 'agent' } | ConvertTo-Json -Depth 6
   $cr = Invoke-RestMethod -Uri ($Url + 'api/cron') -Method Post -Headers $H -ContentType 'application/json' -Body $routineBody -TimeoutSec 30

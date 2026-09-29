@@ -109,14 +109,31 @@ the named specialists, each of which runs its own independent agent loop.
 
 ---
 
+## The task file
+
+The launcher reads **`F:\downloads\a.md`** on every start and uses its contents as the mission objective, wrapped
+with the crew-dispatch directive. Edit that file, re-run the launcher, and the whole crew works the new task. If
+the file is missing or empty the launcher says so and falls back to the built-in default mission.
+
 ## Live work bubbles
 
 ![Live work bubbles](assets/bubbles.png)
 
-While an agent is working, a persistent bubble over its head names what it is doing **right now** (its current
-tool), driven only by real harness events (`agent.run.start` / `agent.tool_call` / `agent.run.end`). A real spoken
-line always wins the single bubble; the work status shows whenever there is no live speech. A TTL sweep means a
-lost `run.end` degrades to silence instead of a stuck bubble.
+While an agent is working, a persistent bubble over its head says **in plain English** what it is doing **right
+now** — not a bare tool id. `web_search` becomes *Searching the web — "best time apps"*, `fs_write` becomes
+*Writing a file — "app/index.html"*, `team.dispatch` becomes *Delegating work to the crew*. It is driven only by
+real harness events (`agent.run.start` / `agent.tool_call` / `agent.run.end`); a real spoken line always wins the
+single bubble, and a TTL sweep means a lost `run.end` degrades to silence instead of a stuck bubble. A late-opened
+page or a reconnect **seeds** a bubble for any agent that is already working, so a bubble is present the whole time
+an agent works. Crew tool activity is broadcast straight to the floor (`floorEmit`), so it is watchable no matter
+how the lead was launched.
+
+## Watching the whole crew
+
+- The CREW rail shows `▮ N WORKING / ▯ M IDLE` from real run events (verified: `8 WORKING` with the whole crew).
+- NOVA (the lead) shows its own live bubble and its mission session in COMMS, so you can read what it is doing and
+  type instructions to redirect the whole staff.
+- `scripts\launch-opencodego.ps1 -WatchSeconds 120` prints the live crew roster to the console while it runs.
 
 ---
 

@@ -85,10 +85,19 @@ index 5c14d193..245e7bd5 100644
            // The catalog must describe the SAME endpoint this provider's runs hit: a per-provider base URL rides every
            // run body (harness.js chat), so listing the default endpoint instead showed models — and reasoning dials —
 diff --git a/frontend/app/world.js b/frontend/app/world.js
-index fda9a918..24adc7fc 100644
+index fda9a918..a673f21d 100644
 --- a/frontend/app/world.js
 +++ b/frontend/app/world.js
-@@ -7675,10 +7675,20 @@ const World = (() => {
+@@ -1783,6 +1783,8 @@ const World = (() => {
+     activity = kind;
+     if (!agent) return;
+     if (kind === 'talk') { releaseSeat(); agent.target = null; agent.pathPts = null; agent.state = 'idle'; agent.sitting = false; agent.working = false; agent.goal = null; agent.usingProp = null; agent.watchProp = null; agent.dir = 'south'; }
++    // the hero is going to work: guarantee a bubble even if this run's start event predates the page/reconnect.
++    if (kind === 'task' || kind === 'thinking') seedLiveStatus(agent.id);
+   }
+ 
+   /* ---------- camera helpers ---------- */
+@@ -7675,10 +7677,20 @@ const World = (() => {
      // keep the HERO's caption up while it's still SPEAKING (a streamed neural reply can outlast the bubble's
      // fixed timer) — so the on-screen line and the voice stay in phase. Crew bodies just follow the timer.
      const speakingNow = (who === agent) && typeof Voice !== 'undefined' && Voice.isSpeaking && Voice.isSpeaking();
@@ -112,7 +121,7 @@ index fda9a918..24adc7fc 100644
  
      // draw in SCREEN space (mirrors drawNameplate): pixel-snapped, unsmoothed VT323 that reads cleanly at any
      // zoom, then it rides the same barrel-curve/scanline pass the rest of the feed does. All geometry is CSS px.
-@@ -7690,7 +7700,7 @@ const World = (() => {
+@@ -7690,7 +7702,7 @@ const World = (() => {
  
      // Wrap to <=3 lines; ellipsize overflow, including unbroken identifiers.
      const fontSz = 16, lh = 17, padX = 6, padY = 5, tailW = 4, tailH = 5;
@@ -121,7 +130,7 @@ index fda9a918..24adc7fc 100644
      const tag = raw.match(/^(working|error|blocked):\s*/i);
      const label = tag ? tag[1].toUpperCase() : '';
      const labelH = label ? 13 : 0;
-@@ -8344,6 +8354,11 @@ const World = (() => {
+@@ -8344,6 +8356,11 @@ const World = (() => {
           lost permission.response would otherwise strand the hero at the wait anchor forever.
       Cheap: iterates only the (usually tiny) live maps, once per second. */
    function sweepStaleStates(now) {
@@ -133,7 +142,16 @@ index fda9a918..24adc7fc 100644
      if (runStartByAgent.size) {
        for (const aid of Array.from(runStartByAgent.keys())) {
          const seen = runLastSeenByAgent.get(aid) || runStartByAgent.get(aid) || 0;
-@@ -9683,6 +9698,34 @@ const World = (() => {
+@@ -9570,7 +9587,7 @@ const World = (() => {
+     b.workRetryAt = 0;
+     if (working) { b.target = null; b.pathPts = null; seizeFromIdle(b); }   // drop any in-flight stroll AND any couch/leisure latch so stepCrew re-paths straight to the chair (J4)
+     const now = now0;
+-    if (working) { b.workUntil = now + 3600000; if (!b.wakeAt || now - b.wakeAt > 1500) b.wakeAt = now; sayAt(b, 'working…'); }
++    if (working) { b.workUntil = now + 3600000; if (!b.wakeAt || now - b.wakeAt > 1500) b.wakeAt = now; sayAt(b, 'working…'); seedLiveStatus(b.agentId); }
+     else { b.workUntil = 0; clearCrewAwait(b, null, false); if (b.say && /working/.test(b.say.text || '')) b.say = { text: '', until: 0 }; }
+     if (working && crewIsAwaiting(b)) { b.awaitResumeWork = true; b.working = false; b.say = { text: '', until: 0 }; }
+     if (working) gripeNoCompute(b);      // G0.7: sat down to work in a computeless room — one honest complaint, then silence
+@@ -9683,6 +9700,78 @@ const World = (() => {
    const TICKER_IDLE_MS = 7000;      // clean frame after 7s of no activity
    // tool-in-flight state for the STRETCH desk glyph: agentId -> { name, callId } while a tool_call is open.
    const glyphByAgent = new Map();
@@ -159,16 +177,60 @@ index fda9a918..24adc7fc 100644
 +    liveStatusByAgent.set(id, { text: t, at: now, until: now + LIVE_STATUS_TTL_MS });
 +  }
 +  function clearLiveStatus(aid) { const id = String(aid || ''); if (id) liveStatusByAgent.delete(id); }
-+  // a human phrase for the live bubble: the tool it is running (name-only views carry no args), else a generic line.
-+  function liveStatusText(name) {
-+    const n = String(name || '').trim();
-+    if (!n) return 'working…';
-+    return 'working: ' + tickerTool(n);
++  // SEED a bubble for an agent that is PROVABLY working but whose run.start/tool_call we never saw live (the page
++  // was opened mid-run, or a reconnect rebuilt state from the snapshot). Without this, a body could be lit and
++  // WORKING with NO bubble at all — the Commander asked for a bubble at ALL times while an agent works. A live
++  // status already present always wins; the next real tool_call refines this within seconds.
++  function seedLiveStatus(aid) {
++    const id = String(aid || '');
++    if (!id) return;
++    const cur = liveStatusByAgent.get(id);
++    const now = (typeof performance !== 'undefined') ? performance.now() : fnow;
++    if (cur && cur.text && cur.until > now) return;
++    setLiveStatus(id, 'working: Reading the task');
++  }
++  /* PLAIN-ENGLISH WORK DESCRIPTIONS. The Commander asked to ALWAYS know, in words, what each working agent is
++     doing — never a bare tool id. This maps a tool name (plus its clipped args when the caller shipped them) to a
++     short English sentence. Name-only views (the lead's own tool calls) still get a clear verb; args only add the
++     specific target. An unknown tool degrades to a readable phrase, never a raw identifier. */
++  const TOOL_VERBS = {
++    web_search: 'Searching the web', web_fetch: 'Reading a web page', browser: 'Browsing the web',
++    fs_read: 'Reading a file', fs_write: 'Writing a file', fs_append: 'Adding to a file', fs_list: 'Listing files',
++    fs_edit: 'Editing a file', fs_delete: 'Removing a file',
++    shell_exec: 'Running a command', shell_bg: 'Running a background command', shell_status: 'Checking a background command',
++    verify_run: 'Running a check',
++    team_dispatch: 'Delegating work to the crew', team_spawn: 'Spinning up helpers', team_subagents: 'Checking on the crew',
++    team_steer: 'Steering a worker', team_summon: 'Summoning a specialist', team_config: 'Reading the crew dossier',
++    team_configure: 'Updating an agent',
++    routine_create: 'Setting up a routine', routine_list: 'Checking routines', routine_run: 'Running a routine',
++    notebook_write: 'Saving a note', notebook_read: 'Reading notes', memory_search: 'Searching memory',
++    image_generate: 'Generating an image', vision_analyze: 'Analyzing an image', deliverable_save: 'Saving a deliverable',
++    session_list: 'Listing sessions', session_create: 'Creating a session', session_peek: 'Reading another session',
++    tool_search: 'Looking for a tool', skill_run: 'Running a skill'
++  };
++  const ARG_KEYS = ['query', 'url', 'path', 'file', 'filename', 'command', 'cmd', 'pattern', 'prompt', 'text', 'name', 'title', 'id', 'to'];
++  function pickArgDetail(args) {
++    const s = String(args == null ? '' : args);
++    if (!s) return '';
++    for (const k of ARG_KEYS) {
++      const m = new RegExp('"' + k + '"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)"').exec(s);
++      if (m && m[1]) return m[1].replace(/\\[nrt]/g, ' ').trim();
++    }
++    const q = /"((?:\\.|[^"\\]){3,})"/.exec(s);   // no known key: the first real quoted string
++    return q ? q[1].replace(/\\[nrt]/g, ' ').trim() : '';
++  }
++  function describeActivity(name, args) {
++    const raw = String(name || '').trim();
++    if (!raw) return 'Thinking about the task';
++    const key = raw.replace(/^mcp__[^_]+__/, '').replace(/[.\-\s]+/g, '_').toLowerCase();
++    const verb = TOOL_VERBS[key] || ('Working on ' + raw.replace(/^mcp__[^_]+__/, '').replace(/[_.]+/g, ' ').toLowerCase());
++    const detail = tickerClip(pickArgDetail(args), 52);
++    return detail ? (verb + ' — "' + detail + '"') : verb;
 +  }
  
    // codename for an agentId (hero or crew body), else a short id fallback — never throws.
    function tickerName(aid) {
-@@ -9833,13 +9876,23 @@ const World = (() => {
+@@ -9833,13 +9922,30 @@ const World = (() => {
      });
      // ── STRETCH: desk work-glyph state — a tool in flight (tool_call → its tool_result) marks the agent;
      //    the render pass (drawWorkGlyphs) draws a tiny tag at that desk. run.end clears any stale mark. ──
@@ -176,25 +238,32 @@ index fda9a918..24adc7fc 100644
 +    U.bus.on('agent.tool_call', p => {
 +      if (!p || !p.agentId || !p.name) return;
 +      glyphByAgent.set(p.agentId, { name: p.name, callId: p.callId || null });
-+      // LIVE WORK BUBBLE: name the tool this agent is running right now (+ a clipped args hint when the caller
-+      // shipped one — interactive runs do, the name-only autonomous view does not). Renewed on every call.
-+      const args = p.argsSummary ? (' — ' + tickerClip(String(p.argsSummary), 72)) : '';
-+      setLiveStatus(p.agentId, liveStatusText(p.name) + args);
++      // LIVE WORK BUBBLE: say, in English, exactly what this agent is doing right now (tool + the specific target
++      // when args were shipped). Renewed on every call, so it is never stale while the agent works.
++      setLiveStatus(p.agentId, 'working: ' + describeActivity(p.name, p.argsSummary));
 +    });
      U.bus.on('agent.tool_result', p => {
        if (!p || !p.agentId) return;
        const g = glyphByAgent.get(p.agentId);
        if (g && (!p.callId || !g.callId || g.callId === p.callId)) glyphByAgent.delete(p.agentId);
-+      // the tool finished: the bubble goes back to a neutral "working" so it never shows a finished tool as current.
-+      if (liveStatusByAgent.has(String(p.agentId))) setLiveStatus(p.agentId, 'working…');
++      // the tool finished and the model is reading its output: say so (specific, never a bare "working…").
++      if (liveStatusByAgent.has(String(p.agentId))) setLiveStatus(p.agentId, 'working: Reading the result');
      });
 -    U.bus.on('agent.run.end', p => { if (p && p.agentId) glyphByAgent.delete(p.agentId); });
-+    U.bus.on('agent.run.end', p => { if (p && p.agentId) { glyphByAgent.delete(p.agentId); clearLiveStatus(p.agentId); } });
-+    U.bus.on('agent.run.error', p => { if (p && p.agentId) clearLiveStatus(p.agentId); });
++    // A run ENDING does not necessarily mean the AGENT stopped: several runs can share one agentId (two hero
++    // streams, a chat run plus a routine/worker run). Clear the bubble only once the world PROVES no run is left,
++    // so an agent that is still working never loses its bubble mid-flight (the Commander's core requirement).
++    const clearStatusWhenIdle = (aid) => {
++      const id = String(aid || '');
++      if (!id) return;
++      setTimeout(() => { try { if (agentRunsLive(id) === 0) clearLiveStatus(id); } catch (_) { clearLiveStatus(id); } }, 1500);
++    };
++    U.bus.on('agent.run.end', p => { if (p && p.agentId) { glyphByAgent.delete(p.agentId); clearStatusWhenIdle(p.agentId); } });
++    U.bus.on('agent.run.error', p => { if (p && p.agentId) clearStatusWhenIdle(p.agentId); });
      U.bus.on('workitem.placed', p => intakeMessage(p));
      // LINE WATCH: the bay lamps + crate cards fold the same run/crate events the floor animates (linewatch.js)
      for (const n of ['workitem.placed', 'workitem.superseded', 'agent.run.start', 'agent.cost', 'agent.run.error', 'agent.run.end']) U.bus.on(n, p => watchEvent(n, p));
-@@ -9932,7 +9985,13 @@ const World = (() => {
+@@ -9932,7 +10038,13 @@ const World = (() => {
      // construction server-initiated (schedule/event/nightshift today) and takes the pose — the old
      // schedule|event whitelist silently dropped trigger 'nightshift', so a self-initiated task ran while the
      // body wandered idle (2026-07-18: the app asserting idle over a provably live run).
@@ -203,12 +272,20 @@ index fda9a918..24adc7fc 100644
 +      if (!p || !p.agentId) return;
 +      // LIVE WORK BUBBLE: EVERY agent that starts a run gets a bubble, directive or not — the Commander asked to
 +      // see what each working agent is doing at all times, hero included. A tool_call refines it a beat later.
-+      setLiveStatus(p.agentId, 'working…');
++      setLiveStatus(p.agentId, 'working: Reading the task');
 +      if (p.trigger && p.trigger !== 'directive') { serverLit.add(p.agentId); if (agent && p.agentId === agent.id) agent.taskViaConveyor = true; setActivityFor(p.agentId, 'task'); }
 +    });
      U.bus.on('agent.run.end', p => { if (p && p.agentId && !noteRunEnd(p.agentId, p.runId) && serverLit.has(p.agentId)) { serverLit.delete(p.agentId); setActivityFor(p.agentId, 'idle'); } });
      // M-mem.4 → notification diet (2026-08-18): auto-compaction no longer toasts — it is loop plumbing,
      // not news. The bottom-bar CTX gauge still flashes its mint "compacted" echo (StationUI listens to
+@@ -10574,6 +10686,7 @@ const World = (() => {
+       if (level != null && !(b.say && b.say.text && b.say.until > now)) b.say = { text: 'LEVEL ' + level, until: now + 2600 };
+     },
+     // read-only introspection for live verification of idle behavior (no side effects)
++    liveBubbles: () => [...liveStatusByAgent].map(([id, s]) => id + ': ' + ((s && s.text) || '')),
+     dbg: () => agent && { goal: agent.goal, quirkKind: agent.quirkKind, sitting: agent.sitting, state: agent.state, stilling: !!agent.stilling, firstWakeDone, wakePhase: agent.wakePhase, moving: !!agent.target, paused: fnow < (agent.pauseUntil || 0), pauseLook: agent.pauseLook, dir: agent.dir, attn: (agent.attn && fnow < agent.attn.until) ? { x: agent.attn.x, y: agent.attn.y, inMs: Math.round(agent.attn.until - fnow) } : null, drive: (fnow < (agent.driveUntil || 0)) ? agent.drive : null, tile: tileOf(agent.px, agent.py), idleUntil: Math.round((agent.idleUntil || 0) - fnow), quirkCd: Math.round(Math.max(0, (agent.quirkCd || 0) - fnow)), offbeatCd: Math.round(Math.max(0, (agent.offbeatCd || 0) - fnow)), fond: [...agent.fond.entries()], pendingMourn: pendingMourn && { tx: pendingMourn.tx, ty: pendingMourn.ty, fond: pendingMourn.fond }, decor: agentDecor.length, crew: crew.length, spendUsd: floor ? (floor.snapshot().spendUsd || 0) : 0, boxes: convey ? convey.boxCount() : 0, queueDepth: queueDepthNow(), bridge: { paused: bridgePaused, es: !!chanES, poll: !!connPollTimer, readyState: (chanES ? chanES.readyState : -1), lastEventMsAgo: (lastSseEventAt ? Math.round((typeof performance !== 'undefined' ? performance.now() : fnow) - lastSseEventAt) : null), linkDown: linkDown((typeof performance !== 'undefined') ? performance.now() : fnow) }, ttl: { runClocks: runStartByAgent.size, glyphs: glyphByAgent.size, serverLit: serverLit.size, runTtlMs: RUN_TTL_MS, awaitTtlMs: AWAIT_TTL_MS }, await: awaitPrompt ? { promptId: awaitPrompt.promptId, arrived: awaitArrived, source: awaitAnchor ? awaitAnchor.source : null, anchor: awaitAnchor ? { tx: awaitAnchor.tx, ty: awaitAnchor.ty } : null } : null, proposalsPinned: pinnedCount, social: socialBeat && { kind: socialBeat.kind, aId: socialBeat.aId, bId: socialBeat.bId }, chase: chaseId != null && { id: chaseId, phase: (bodyForAgent(chaseId) && bodyForAgent(chaseId).chase && bodyForAgent(chaseId).chase.phase) || null }, chaseGateIn: Math.round(Math.max(0, chaseGateUntil - fnow)), cursorFresh: (fnow - lastCursor.t) < CURSOR_FRESH_MS, cursorMoving: (fnow - cursorMoveT) < CURSOR_MOVING_MS },
+     // read-only camera truth for the DEV verify harness (+ the war-room HUD chip): who drives the camera
+     // ('manual' | 'lock' = session follow | 'auto' = idle cinecam), which body is locked, and how long the
 diff --git a/frontend/index.html b/frontend/index.html
 index da269e31..f9213c7b 100644
 --- a/frontend/index.html
@@ -253,7 +330,7 @@ index 6e497950..7390c42c 100644
            // fresh newId() already in scope — determinism-clean). Without it the reply is buffered into `state.buf`
            // and only an outcome enum escapes, so the actual work is invisible: it persists under the 'global'
 diff --git a/sidecar/index.js b/sidecar/index.js
-index 05744537..498f8355 100644
+index 05744537..f1b8e6c6 100644
 --- a/sidecar/index.js
 +++ b/sidecar/index.js
 @@ -3168,6 +3168,12 @@ async function runSkillCurator(o) {
@@ -297,7 +374,20 @@ index 05744537..498f8355 100644
    hostLiveRuns.set(rid, { agentId: String((o && o.agentId) || 'agent'), startedAt: Date.now(), source: 'host' });
    try { return await runOnceCore(o); }
    finally { hostLiveRuns.delete(rid); }
-@@ -18262,7 +18276,10 @@ async function runOnceCore(o) {
+@@ -16783,6 +16797,12 @@ async function runOnceCore(o) {
+   // THIS SAME runOnce per worker; the roster supplies each worker's composed identity (system prompt + model).
+   makeOrchestrationTools({
+     runOnce, roster: () => agentRoster, key: runKey, model, provider: providerId, baseUrl, reasoningEffort, subagents,
++    /* FLOOR BROADCAST, independent of the lead's own stream path. A delegated worker's live activity must reach the
++       station HUD no matter HOW the lead was launched (browser / scheduled fire / Run Now). This tees the SAME
++       unit-tested runTeeView policy straight to SSE, so every crew member's desk glyph and live work bubble update
++       in real time even when the lead's stream is a headless HTTP response. Only refcounted/stateless events ride
++       it (run.start/end/error + name-only tool_call); cost/deliverable are NOT duplicated here. */
++    floorEmit: (name, payload) => { try { const v = runTeeView(name, payload); if (v) sse.broadcast(name, redact(v)); } catch (_) {} },
+     coordinateResults: require('./overseer.js').isCoordinatorRun({ ...o, agentId, surface }),
+     classes: SPECIALIST_CLASSES,   // Class Loadouts S1: the summon-tool class list, composed from the shared catalog (no hardcoded prose)
+     selfSystem: system,   // team.spawn clones the LEAD's OWN base identity into each ephemeral subagent (Meeseeks)
+@@ -18262,7 +18282,10 @@ async function runOnceCore(o) {
        + (anyTrack ? '\n  A [bracketed] note is that specialist\'s REAL track record on this station — earned from work the '
          + 'Commander rated and runs the harness watched finish. Use it to pick the right worker; it is evidence, not a '
          + 'permission level, and an agent without one is simply new, not worse.' : '');
@@ -309,7 +399,7 @@ index 05744537..498f8355 100644
        + 'Use background:true for watchable long-running spawned workers, then inspect/control them with team.subagents, team.interrupt, and team.resume. '
        + 'When a running background worker needs a mid-flight correction or new information, use team.steer (pass the id and generation from team.subagents) instead of interrupting and restarting it.';
      // Class Loadouts S1: the class list here is composed from the SHARED catalog (id + tagline), never hardcoded,
-@@ -18419,7 +18436,7 @@ async function runOnceCore(o) {
+@@ -18419,7 +18442,7 @@ async function runOnceCore(o) {
    // RUN quests bind only through quest.update op:"start" (or a successful named progress tick). Admission cannot
    // infer which of several open objectives this arbitrary task is doing, so it deliberately binds nothing here.
    let taskIntentNote = '';
@@ -318,7 +408,7 @@ index 05744537..498f8355 100644
    // SERVICE KEYS (KEYS tab): advertise the env-var NAMES of the Commander's connected platform keys — value never
    // rides the prompt. TRUTHFUL-TELEMETRY GATE: the block says "available to your shell commands", so it composes
    // ONLY when shell.exec is in THIS run's resolved tool set (same discipline as the quest block above). A user with
-@@ -22727,7 +22744,27 @@ async function serveStatic(req, res) {
+@@ -22727,7 +22750,27 @@ async function serveStatic(req, res) {
        // `hasKey` is the honest half: the page's credential badge assumed a DEV boot meant the host HELD a
        // runtime key for `prov`, so a seeded station with no key at all still rendered "● KEY SAVED". Say
        // whether one actually exists — still no secret crosses, only the boolean.
@@ -486,43 +576,76 @@ index 78149dc4..0fd17762 100644
        fs.fsyncSync(fd);
      } finally {
 diff --git a/sidecar/tools/builtin/orchestration.js b/sidecar/tools/builtin/orchestration.js
-index a84106f6..425fa5b7 100644
+index a84106f6..2b7b1d4d 100644
 --- a/sidecar/tools/builtin/orchestration.js
 +++ b/sidecar/tools/builtin/orchestration.js
-@@ -36,7 +36,11 @@
+@@ -36,7 +36,20 @@
    // 'deliverable' forwards too (2026-07-07 escape): a worker's saved image/file was INVISIBLE — no COMMS card,
    // no crate, no notify — because the event died here. The payload already carries the OWNING agentId and its
    // jail-relative path, and the frontend card opens /api/file?agent=<owner>, so forwarding is the whole fix.
 -  const FORWARD = { 'agent.run.start': 1, 'agent.run.end': 1, 'agent.run.error': 1, 'agent.cost': 1, 'deliverable': 1 };
 +  const FORWARD = { 'agent.run.start': 1, 'agent.run.end': 1, 'agent.run.error': 1, 'agent.cost': 1, 'deliverable': 1, 'agent.tool_call': 1 };
-+  // The forwarded tool_call is reduced to IDENTITY ONLY (no argsSummary): it exists so the FLOOR can light the
-+  // worker's desk glyph + show its live work bubble ("working: WEB.SEARCH"), not to replay the worker's tool
-+  // arguments into the lead's COMMS. Anything that would render prose stays out.
-+  const floorToolCall = (p) => ({ agentId: p && p.agentId, runId: p && p.runId, callId: p && p.callId, name: p && p.name });
++  // The forwarded tool_call exists so the FLOOR can light the worker's desk glyph and show a live, PLAIN-ENGLISH
++  // work bubble over its head ("working: Searching the web — \"best time apps\""). That needs the ARGUMENTS, so a
++  // CLIPPED argsSummary rides along (never the raw payload, never more than 240 chars). The world turns
++  // name+args into a human sentence; nothing here is prose the lead's COMMS would render as the worker's output.
++  const FLOOR_ARGS_MAX = 240;
++  const floorToolCall = (p) => ({
++    agentId: p && p.agentId, runId: p && p.runId, callId: p && p.callId, name: p && p.name,
++    argsSummary: (p && typeof p.argsSummary === 'string') ? p.argsSummary.slice(0, FLOOR_ARGS_MAX) : ''
++  });
++  // Refcounted/stateless events ALSO teed straight to the station HUD via the host's floorEmit, so a delegated
++  // worker is watchable no matter how the lead was launched (a headless Run Now/scheduled lead's own stream never
++  // reaches the browser). cost/deliverable are deliberately NOT here — they already reach the floor via the lead.
++  const FLOOR_DIRECT = { 'agent.tool_call': 1, 'agent.run.start': 1, 'agent.run.end': 1, 'agent.run.error': 1 };
    // a delegated worker's added kit, on top of the autonomous full office (compute/web/files/memory/studio/jukebox):
    // the WORKBENCH (terminal). Paired with the SHARED lead consent broker, shell/writes follow the lead's APPROVAL
    // posture — so a worker has the same reach as the orchestrator, gated by the same approvals.
-@@ -570,7 +574,11 @@
+@@ -570,7 +583,18 @@
          const overflowNote = overflow.length ? ' — ' + overflow.length + ' NOT dispatched (max ' + maxWorkers + ' per call; dispatch the rest in a follow-up call)' : '';
  
          // forward ONLY lifecycle/cost from children onto the lead's bus (the floor animation reads agent.run.start).
 -        const childEmit = (name, payload) => { if (FORWARD[name] && ctx && typeof ctx.emit === 'function') { try { ctx.emit(name, payload); } catch (_) {} } };
-+        // agent.tool_call rides along IDENTITY-ONLY so the floor shows WHAT a working crew member is doing.
++        // agent.tool_call rides along (clipped args) so the floor shows WHAT a working crew member is doing.
++        // FLOOR_DIRECT (module scope): these also tee straight to SSE via the host's floorEmit, so the crew is
++        // watchable no matter how the lead was launched.
 +        const childEmit = (name, payload) => {
-+          if (!FORWARD[name] || !ctx || typeof ctx.emit !== 'function') return;
-+          try { ctx.emit(name, name === 'agent.tool_call' ? floorToolCall(payload) : payload); } catch (_) {}
++          if (!FORWARD[name]) return;
++          const out = (name === 'agent.tool_call') ? floorToolCall(payload) : payload;
++          if (typeof process !== 'undefined' && process.env && process.env.STARNET_DEBUG_FLOOR === '1') {
++            try { console.error('[floor] childEmit ' + name + ' agent=' + ((payload && payload.agentId) || '') + ' ctxEmit=' + (ctx && typeof ctx.emit === 'function') + ' floorEmit=' + (typeof deps.floorEmit === 'function')); } catch (_) {}
++          }
++          if (ctx && typeof ctx.emit === 'function') { try { ctx.emit(name, out); } catch (_) {} }
++          if (FLOOR_DIRECT[name] && typeof deps.floorEmit === 'function') { try { deps.floorEmit(name, out); } catch (_) {} }
 +        };
  
          // validate every target up front: a real, live, OTHER worker (never self, never an unknown agentId).
          const jobs = reqs.map(w => {
-@@ -889,7 +897,10 @@
+@@ -760,7 +784,10 @@
+             // parentRunId: a CANCELLED lead run cancels this worker too (subagents.cancelChildren); a lead that ends
+             // normally leaves it running — outliving the call is what background:true is for.
+             return subagents.start({ ...projectOptions(job.sessionContext || ctx), leadId, parentRunId: (ctx && ctx.runId) || '', parentStreamId: deps.coordinateResults === true && ctx && ctx.streamId !== 'global' ? ctx.streamId : '', streamId: job.streamId || '', agentId: job.agentId, prompt: job.prompt, context: job.context, runId: newId(), resultSchema: job.resultSchema }, async (h) => {
+-              const r = await runWorker(job, { runId: h.runId, signal: h.signal, emit: h.emit, steer: h.steer });
++              // h.emit keeps the durable watch tail; childEmit ALSO rides the lead's stream + the floor broadcast, so
++              // a BACKGROUND worker is just as watchable as a foreground one.
++              const bgEmit = (name, payload) => { try { h.emit(name, payload); } catch (_) {} childEmit(name, payload); };
++              const r = await runWorker(job, { runId: h.runId, signal: h.signal, emit: bgEmit, steer: h.steer });
+               return { status: r.reason === 'done' ? 'done' : 'error', reason: r.reason, result: r.result, usd: r.usd || 0,
+                 structuredResult: r.structuredResult, validation: r.validation, repairRunId: r.repairRunId, artifacts: r.artifacts,
+                 taintedBy: r.taintedBy || '' };
+@@ -889,7 +916,15 @@
  
          // forward ONLY lifecycle/cost onto the lead's bus so the floor materializes/pops the Meeseeks live; the
          // durable record (via h.emit) keeps the full watch tail for team.subagents/interrupt/resume.
 -        const childEmit = (name, payload) => { if (FORWARD[name] && ctx && typeof ctx.emit === 'function') { try { ctx.emit(name, payload); } catch (_) {} } };
 +        const childEmit = (name, payload) => {
-+          if (!FORWARD[name] || !ctx || typeof ctx.emit !== 'function') return;
-+          try { ctx.emit(name, name === 'agent.tool_call' ? floorToolCall(payload) : payload); } catch (_) {}
++          if (!FORWARD[name]) return;
++          const out = (name === 'agent.tool_call') ? floorToolCall(payload) : payload;
++          if (typeof process !== 'undefined' && process.env && process.env.STARNET_DEBUG_FLOOR === '1') {
++            try { console.error('[floor] childEmit ' + name + ' agent=' + ((payload && payload.agentId) || '') + ' ctxEmit=' + (ctx && typeof ctx.emit === 'function') + ' floorEmit=' + (typeof deps.floorEmit === 'function')); } catch (_) {}
++          }
++          if (ctx && typeof ctx.emit === 'function') { try { ctx.emit(name, out); } catch (_) {} }
++          if (FLOOR_DIRECT[name] && typeof deps.floorEmit === 'function') { try { deps.floorEmit(name, out); } catch (_) {} }
 +        };
  
          const spawnOne = (task, i) => {

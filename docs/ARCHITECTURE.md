@@ -40,7 +40,7 @@ Both are read-only and never print key material.
 | `sidecar/providers/responses.js` | *(new file)* generic OpenAI Responses adapter |
 | `sidecar/cron-driver.js` | **crew-aware routines**: a scheduled fire is a `lead`, so the routine agent gets `team.dispatch` (opt out with `STARNET_CRON_LEAD=0`) |
 | `sidecar/index.js` | same for Run Now; provider-aware DEV boot payload; no-questions gating; orchestration note prefers `team.dispatch` over `team.spawn`; **every real host run is registered in `hostLiveRuns`** so delegated workers appear in `GET /api/state/snapshot` and an SSE reconnect no longer drops the crew |
-| `sidecar/tools/builtin/orchestration.js` | worker `agent.tool_call` forwarded **identity-only** so the floor can show each worker's live tool |
+| `sidecar/tools/builtin/orchestration.js` | worker `agent.tool_call` forwarded with a **clipped `argsSummary`** (240 chars) and teed straight to SSE via `floorEmit` (`FLOOR_DIRECT`), so the floor shows each worker's live tool even when the lead is headless; background workers get the same `childEmit` treatment |
 | `sidecar/run-journal.js` | self-heals on `ENOENT` |
 | `frontend/app/world.js` | **live work bubbles**: a persistent per-agent status bubble fed by real events, with a TTL sweep |
 | `frontend/app/app.js`, `harness.js`, `modeldock.js`, `frontend/index.html` | `opencode-go` normalization + the OPENCODE GO provider button |
@@ -60,13 +60,18 @@ Both are read-only and never print key material.
 
 `frontend/app/world.js` keeps `liveStatusByAgent` (agentId → `{ text, at, until }`):
 
-- `agent.run.start` → `working…`
-- `agent.tool_call` → `working: <TOOL>` (plus a clipped arg hint when the caller ships one)
-- `agent.tool_result` → back to `working…`
-- `agent.run.end` / `agent.run.error` → cleared
+- `agent.run.start` → `working: Reading the task`
+- `agent.tool_call` → `working: <describeActivity(name, args)>` — a plain-English sentence (verb table + the
+  specific target picked out of the args: query / url / path / command / title …)
+- `agent.tool_result` → `working: Reading the result`
+- `agent.run.end` / `agent.run.error` → cleared **only once `agentRunsLive(id) === 0`** (concurrent runs share an
+  agentId; clearing on the first end would drop a still-working agent's bubble)
+- `seedLiveStatus` guarantees a bubble for any agent the world proves is working but whose start event predates the
+  page/reconnect
 - `sweepStaleStates` drops anything older than the TTL
 
 `drawBubble` renders the status only when there is no live speech, so one bubble is ever on screen per body.
+`World.liveBubbles()` exposes the live map for debugging/tests.
 
 ## Configuration (environment)
 
