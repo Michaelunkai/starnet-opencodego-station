@@ -69,7 +69,7 @@ if (-not $ProxyDir) {
 $ProxyConfig = if ($ProxyDir) { Join-Path $ProxyDir 'config.json' } else { $null }
 # Prefer the newest hardened build; fall back to the plain name only.
 $ProxyExe = if ($ProxyDir) {
-  @('OpencodeGoProxy_v7.exe','OpencodeGoProxy_v6.exe','OpencodeGoProxy_v5.exe','OpencodeGoProxy_v4.exe','OpencodeGoProxy_v3.exe','OpencodeGoProxy_v2.exe','OpencodeGoProxy.exe') |
+  @('OpencodeGoProxy_v9.exe','OpencodeGoProxy.exe') |
     ForEach-Object { Join-Path $ProxyDir $_ } | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
 } else { $null }
 $StateDir = 'F:\study\Windows\Applications\PowerShell\Automation\OpenCode\State\StarNet\opencodego'
@@ -113,8 +113,14 @@ if ($ProxyExe -and (Test-Path -LiteralPath $ProxyExe)) {
   $proxyCmd = Join-Path $StateDir 'start-proxy.cmd'; $proxyOut = Join-Path $StateDir 'proxy.out.log'; $proxyErr = Join-Path $StateDir 'proxy.err.log'
   [IO.File]::WriteAllText($proxyCmd, (@(
     '@echo off', ('cd /d "{0}"' -f $ProxyDir), ':loop',
+    ('netstat -ano -p tcp | find ":4001" | find "LISTENING" >nul 2>&1'),
+    'if not errorlevel 1 (',
+    ('echo [%DATE% %TIME%] port 4001 already owned - duplicate suppressed >> "{0}"' -f $proxyOut),
+    'ping -n 11 127.0.0.1 >nul',
+    'goto loop',
+    ')',
     ('echo [%DATE% %TIME%] starting proxy >> "{0}"' -f $proxyOut),
-    ('"{0}" -Mode Serve -ConfigPath "{1}" 1>> "{2}" 2>> "{3}"' -f $ProxyExe, $ProxyConfig, $proxyOut, $proxyErr),
+    ('"{0}" -Mode Serve -ConfigPath "{1}" -ShowConsole 1>> "{2}" 2>> "{3}"' -f $ProxyExe, $ProxyConfig, $proxyOut, $proxyErr),
     ('echo [%DATE% %TIME%] proxy exited, restarting in 2s >> "{0}"' -f $proxyOut), 'ping -n 3 127.0.0.1 >nul', 'goto loop'
   ) -join "`r`n"), (New-Object Text.UTF8Encoding($false)))
   try { Unregister-ScheduledTask -TaskName 'StarNet-OpenCodeGoProxy' -Confirm:$false -ErrorAction SilentlyContinue } catch {}
@@ -221,13 +227,13 @@ $Roles = @(
   @{ id = 'operator';   name = 'OPERATOR';   job = 'EXCLUSIVE SLICE: deployment only. Create launch steps/scripts so the result runs on demand. Do NOT build the artifact or write the README. Save scripts to YOUR workspace.' },
   @{ id = 'foreman';    name = 'FOREMAN';    job = 'EXCLUSIVE SLICE: tracking only. Track all workstreams, report live status, what is left, blockers. Do NOT do the work itself. Save status to YOUR workspace.' }
 )
-'$novaLead = "You are NOVA, the team leader. YOUR FIRST ACTION in your FIRST response MUST be ONE team_dispatch call covering ALL 7 specialists (scout, researcher, analyst, engineer, writer, operator, foreman) with parallel:true. Give each a specific subtask with acceptance criteria. Do NOT pass resultSchema on workers - plain text results are accepted this way. Do NOT call shell_exec, fs_write, fs_read or fs_edit yourself - NOVA ORCHESTRATES, it does not build. After dispatching: monitor, re-dispatch any worker that returns invalid-result or refused with a simpler prompt, VERIFY each deliverable against the original task, and report every worker completion in chat. Never stop until EVERYTHING is complete and verified."'
+'$novaLead = "You are NOVA, the team leader. YOUR FIRST ACTION in your FIRST response MUST be ONE team_dispatch call covering ALL 7 specialists (scout, researcher, analyst, engineer, writer, operator, foreman) with parallel:true. Give each a specific subtask with acceptance criteria. Do NOT pass resultSchema on workers - plain text results are accepted this way. Do NOT call shell_exec, fs_write, fs_read or fs_edit yourself - NOVA ORCHESTRATES, it does not build. After dispatching: monitor, re-dispatch any worker that returns invalid-result or refused with a simpler prompt, VERIFY each deliverable against the original task, and report every worker completion in chat. Never stop until EVERYTHING is complete and verified."' HARD RULES: NEVER call shell_exec, fs_read, fs_write, or fs_edit yourself — NOVA ORCHESTRATES, it does not build. Do NOT pass resultSchema to workers — plain text results are accepted. If a worker returns invalid-result or refused, re-dispatch ONLY that worker with a simpler prompt. Report every worker completion in chat as it lands."
 $canonical = $Roles | ForEach-Object { 'MISSION: ' + $_.name }
 try {
   try {
     $list = Invoke-RestMethod -Uri ($Url + 'api/cron') -Headers $H -TimeoutSec 15
     foreach ($j in @($list.jobs)) {
-      if (.name -eq 'TEST' -or (.name -like 'MISSION:*' -and .name -ne 'MISSION: NOVA') -or (.name -like 'DISPATCH-*') -or (.name -like 'CREW:*')) {
+      if ($j.name -eq 'TEST' -or ($j.name -like 'MISSION:*' -and $j.name -ne 'MISSION: NOVA')) {
         try { Invoke-RestMethod -Uri ($Url + 'api/cron/remove') -Method Post -Headers $H -ContentType 'application/json' -Body (@{ id = $j.id } | ConvertTo-Json) -TimeoutSec 15 | Out-Null } catch {}
       }
     }
