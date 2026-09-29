@@ -353,11 +353,57 @@ index 6e497950..c74bdf44 100644
            // Host-minted recovery identity. The active-run journal can now tie an interrupted headless run back
            // to the routine that launched it without trusting model text or guessing from the stream id.
            cronJobId: job.id, cronJobName: job.name || '',
+diff --git a/sidecar/diagnostics.js b/sidecar/diagnostics.js
+index e35813d6..0aef60db 100644
+--- a/sidecar/diagnostics.js
++++ b/sidecar/diagnostics.js
+@@ -225,7 +225,7 @@
+         // Spelled out rather than left as a flag: whoever reads this report needs to know that a configured proxy
+         // is NOT in the engine's path, because that single fact explains "the app works but chat can't connect".
+         'Proxy:         ' + (r.proxy.configured
+-          ? (r.proxy.vars.join(', ') + ' — NOT used by the engine (its outbound calls bypass the proxy; likely cause of provider connection failures)')
++          ? (r.proxy.vars.join(', ') + (r.proxy.vars.some(v => v.startsWith('OPENCODEGO=')) ? ' — provider endpoint (OpenCodeGo proxy)' : ' — NOT used by the engine (its outbound calls bypass the proxy; likely cause of provider connection failures)'))
+           : 'none configured'),
+         'Agents:        ' + r.agentCount,
+         'Uptime:        ' + r.uptime,
+@@ -239,10 +239,14 @@
+       lines.push('Source commit: ' + (r.buildSha || 'unknown') + (r.buildDirty === true ? ' (dirty)' : ''));
+       if (r.paidAccount) {
+         const p = r.paidAccount;
+-        lines.push('Paid account:  ' + (p.fingerprint || 'unknown') + ' · link ' + p.link + ' · auth ' + p.auth);
+-        lines.push('Token source:  ' + p.credential + ' (presence only; OS durability not rechecked)');
+-        lines.push('Balance:       ' + p.balance + (p.balanceUsd == null ? '' : ' · $' + p.balanceUsd.toFixed(2))
+-          + ' · observed ' + (iso(p.observedAt) || 'unknown') + ' · captured ' + (iso(p.capturedAt) || 'unknown'));
++        if (p.configured) {
++          lines.push('Paid account:  ' + (p.fingerprint || 'unknown') + ' · link ' + p.link + ' · auth ' + p.auth);
++          lines.push('Token source:  ' + p.credential + (p.credential === 'none' ? ' (presence only; OS durability not rechecked)' : ''));
++          lines.push('Balance:       ' + p.balance + (p.balanceUsd == null ? '' : ' · $' + p.balanceUsd.toFixed(2))
++            + ' · observed ' + (iso(p.observedAt) || 'unknown') + ' · captured ' + (iso(p.capturedAt) || 'unknown'));
++        } else {
++          lines.push('Paid account:  not configured (no StarNet subscription linked)');
++        }
+         if (p.transition) lines.push('Link change:   ' + p.transition.state + ' @ ' + (iso(p.transition.at) || 'unknown'));
+       }
+       /* Quota, as last OBSERVED — the counters ride on ordinary successful responses, so this is real state
 diff --git a/sidecar/index.js b/sidecar/index.js
-index 05744537..3c12bd55 100644
+index 05744537..2816da25 100644
 --- a/sidecar/index.js
 +++ b/sidecar/index.js
-@@ -3168,6 +3168,12 @@ async function runSkillCurator(o) {
+@@ -1340,6 +1340,13 @@ function proxySnapshot() {
+     const label = name.toUpperCase() + '=' + host;      // fold the lower/upper duplicates of the same var
+     if (vars.indexOf(label) < 0) vars.push(label);
+   }
++  // Detect the OpenCodeGo local proxy — it IS the provider endpoint, not a system proxy, but surfacing
++  // it helps users confirm the sidecar can reach the proxy. Base URL comes from OPENCODEGO_BASE_URL / OPENCODE_GO_BASE_URL.
++  const openCodeBase = String(process.env.OPENCODEGO_BASE_URL || process.env.OPENCODE_GO_BASE_URL || '').trim();
++  if (openCodeBase) {
++    const host = proxyHostOnly(openCodeBase);
++    if (host && vars.indexOf('OPENCODEGO=' + host) < 0) vars.push('OPENCODEGO=' + host);
++  }
+   return { configured: vars.length > 0, vars: vars };
+ }
+ // wrap any run emit fn so an `agent.run.error` also lands in the diagnostics ring (one sink for every run path).
+@@ -3168,6 +3175,12 @@ async function runSkillCurator(o) {
     Full Access is FROZEN at boot: a tool or model output cannot flip it at runtime — closes the
     prompt-injection escalation path (mirrors the reference harness's import-frozen YOLO flag). */
  const FULL_ACCESS = /^(1|true|yes|on)$/i.test(String(ENV('FULL_ACCESS') || '').trim());
@@ -370,7 +416,7 @@ index 05744537..3c12bd55 100644
  /* MASTER BYPASS (2026-08-05, the Commander's explicit call) — the runtime "FULL BYPASS" switch behind
     Settings → PERMISSIONS. When ON: every agent, every surface (watched chat, Telegram, routines, night
     shift) skips the consent broker AND gets owner-DM-grade impact reach (shell, media, connectors)
-@@ -13296,7 +13302,11 @@ async function handleCronRun(req, res) {
+@@ -13296,7 +13309,11 @@ async function handleCronRun(req, res) {
        // under the SAME per-run stream so the frontend cron-session (autosessions.js), which forms off the
        // identical cron.fire/cron.result events, can fetch the real output via /api/transcript?stream=cron-<runId>.
        // Per-run id keeps the seed empty (index.js reconstructs a stream only when messages<=1) — no behavior drift.
@@ -383,7 +429,7 @@ index 05744537..3c12bd55 100644
        // LINE WATCH: the row records the bay + line this Run Now's crate named (placeCronWorkitem above)
        lineId: (cronItems.get(runId) || {}).lineId || undefined, dockId: (cronItems.get(runId) || {}).dockId || undefined,
        reflect: true,   // Run Now must match the scheduled fire's posture exactly, memory included (see the reflect note on /api/run)
-@@ -16184,9 +16194,13 @@ async function runOnce(o) {
+@@ -16184,9 +16201,13 @@ async function runOnce(o) {
  const hostLiveRuns = new Map();   // runId -> { agentId, startedAt, source }
  async function runOnceTracked(o) {
    const rid = o && o.runId ? String(o.runId) : '';
@@ -400,7 +446,7 @@ index 05744537..3c12bd55 100644
    hostLiveRuns.set(rid, { agentId: String((o && o.agentId) || 'agent'), startedAt: Date.now(), source: 'host' });
    try { return await runOnceCore(o); }
    finally { hostLiveRuns.delete(rid); }
-@@ -16783,6 +16797,12 @@ async function runOnceCore(o) {
+@@ -16783,6 +16804,12 @@ async function runOnceCore(o) {
    // THIS SAME runOnce per worker; the roster supplies each worker's composed identity (system prompt + model).
    makeOrchestrationTools({
      runOnce, roster: () => agentRoster, key: runKey, model, provider: providerId, baseUrl, reasoningEffort, subagents,
@@ -413,7 +459,7 @@ index 05744537..3c12bd55 100644
      coordinateResults: require('./overseer.js').isCoordinatorRun({ ...o, agentId, surface }),
      classes: SPECIALIST_CLASSES,   // Class Loadouts S1: the summon-tool class list, composed from the shared catalog (no hardcoded prose)
      selfSystem: system,   // team.spawn clones the LEAD's OWN base identity into each ephemeral subagent (Meeseeks)
-@@ -18262,7 +18282,10 @@ async function runOnceCore(o) {
+@@ -18262,7 +18289,10 @@ async function runOnceCore(o) {
        + (anyTrack ? '\n  A [bracketed] note is that specialist\'s REAL track record on this station — earned from work the '
          + 'Commander rated and runs the harness watched finish. Use it to pick the right worker; it is evidence, not a '
          + 'permission level, and an agent without one is simply new, not worse.' : '');
@@ -425,7 +471,7 @@ index 05744537..3c12bd55 100644
        + 'Use background:true for watchable long-running spawned workers, then inspect/control them with team.subagents, team.interrupt, and team.resume. '
        + 'When a running background worker needs a mid-flight correction or new information, use team.steer (pass the id and generation from team.subagents) instead of interrupting and restarting it.';
      // Class Loadouts S1: the class list here is composed from the SHARED catalog (id + tagline), never hardcoded,
-@@ -18419,7 +18442,7 @@ async function runOnceCore(o) {
+@@ -18419,7 +18449,7 @@ async function runOnceCore(o) {
    // RUN quests bind only through quest.update op:"start" (or a successful named progress tick). Admission cannot
    // infer which of several open objectives this arbitrary task is doing, so it deliberately binds nothing here.
    let taskIntentNote = '';
@@ -434,7 +480,25 @@ index 05744537..3c12bd55 100644
    // SERVICE KEYS (KEYS tab): advertise the env-var NAMES of the Commander's connected platform keys — value never
    // rides the prompt. TRUTHFUL-TELEMETRY GATE: the block says "available to your shell commands", so it composes
    // ONLY when shell.exec is in THIS run's resolved tool set (same discipline as the quest block above). A user with
-@@ -22727,7 +22750,27 @@ async function serveStatic(req, res) {
+@@ -19990,7 +20020,7 @@ function collectDiagnosticsInput(opts) {
+     // desktop vs browser — provable from the request origin (Tauri custom-scheme origins are the desktop shell)
+     const origin = String(opts.origin || '').toLowerCase();
+     const mode = opts.mode === 'desktop' || opts.mode === 'browser'
+-      ? opts.mode : (TAURI_ORIGINS.has(origin) ? 'desktop' : (origin ? 'browser' : ''));
++      ? opts.mode : (TAURI_ORIGINS.has(origin) ? 'desktop' : (origin ? 'browser' : 'browser'));
+     // active provider + model SLUG (never a key): the newest run is the strongest proof of what actually ran; fall
+     // back to the primary roster agent's configured identity when no run has happened yet.
+     const recent = (() => { try { return runStore.list(null, { limit: 1 })[0] || null; } catch (_) { return null; } })();
+@@ -20033,7 +20063,7 @@ function collectDiagnosticsInput(opts) {
+       agentCount: agentRoster.size,
+       uptimeMs: Date.now() - PROCESS_START,
+       workspacePresent: workspacePresent,
+-      lastRun: recent ? { runId: recent.runId, status: recent.reason, ts: recent.ts } : null,
++      lastRun: (() => { try { const r = runStore.list(null, { limit: 1 })[0] || null; if (!r) return null; if (r.reason === 'interrupted' && r.ts && Date.now() - r.ts > 300000) return null; return { runId: r.runId, status: r.reason, ts: r.ts }; } catch (_) { return null; } })(),
+       // observed provider quota. Empty until a call has actually been made — an empty array means NO DATA and
+       // must never be rendered as "plenty left" (see ratelimits.advise).
+       rateLimits: (() => { try { return rateLimits.snapshot(); } catch (_) { return []; } })(),
+@@ -22727,7 +22757,27 @@ async function serveStatic(req, res) {
        // `hasKey` is the honest half: the page's credential badge assumed a DEV boot meant the host HELD a
        // runtime key for `prov`, so a seeded station with no key at all still rendered "● KEY SAVED". Say
        // whether one actually exists — still no secret crosses, only the boolean.
