@@ -67,7 +67,7 @@ function Test-Listen([int]$p) {
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 $candidates = @()
 if ($Repo) { $candidates += $Repo }
-$candidates += @($ScriptDir, (Split-Path -Parent $ScriptDir), 'C:\Users\Admin\StarNet', 'C:\StarNet', (Join-Path $env:USERPROFILE 'StarNet'))
+$candidates += @($ScriptDir, (Split-Path -Parent $ScriptDir), 'F:\study\Windows\Applications\PowerShell\Automation\OpenCode\Scripts\starnet', 'F:\study\Windows\Applications\PowerShell\Automation\OpenCode\Scripts\starnet', (Join-Path $env:USERPROFILE 'StarNet'))
 $Repo = $null
 foreach ($c in $candidates) { if ($c -and (Test-Path -LiteralPath (Join-Path $c 'sidecar\index.js'))) { $Repo = (Resolve-Path -LiteralPath $c).Path; break } }
 if (-not $Repo) { Fail "Could not find a StarNet checkout. Pass -Repo <path>." }
@@ -217,6 +217,9 @@ $envLines = @(
   'set "STARNET_NO_QUESTIONS=1"'
   'set "STARNET_CRON_ENABLED=1"'
   'set "STARNET_CRON_LEAD=1"'
+  'set "STARNET_CRON_MAX_RUN_MS=3600000"'
+  'set "STARNET_CRON_HEARTBEAT_STALE_MS=1800000"'
+  'set "STARNET_CRON_STALENESS_MULT=2"'
   'set "STARNET_MAX_CONCURRENT_AGENTS=12"'
   'set "STARNET_MAX_UNPRICED_TOKENS=0"'
   'set "STARNET_UNCAUGHT_KEEP_SERVING=1"'
