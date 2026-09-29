@@ -236,7 +236,6 @@ try {
 $persisted = 0
 try { $list = Invoke-RestMethod -Uri ($Url + 'api/cron') -Headers $H -TimeoutSec 15; $persisted = @($list.jobs | Where-Object { $_.name -eq 'MISSION: NOVA' }).Count } catch {}
 
-else { Warn ("mission routines: expected " + $Roles.Count + ", found " + $persisted) }
 
 # 13. WAIT FOR PARALLEL CREW (need 5+ distinct agents to prove true parallelism)
 Step "waiting for agents (up to ${CrewWaitSec}s)..."
