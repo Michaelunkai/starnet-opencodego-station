@@ -207,7 +207,6 @@ try {
   $bp = Invoke-RestMethod -Uri ($Url + 'api/permissions/bypass') -Method Post -Headers $H -ContentType 'application/json' -Body (@{ on = $true } | ConvertTo-Json) -TimeoutSec 10
   Step ("bypass: " + $bp.masterBypass)
 } catch { Warn "bypass failed" }
-# 11. MISSION - ALL 8 FIRE IN PARALLEL, NON-OVERLAPPING SLICES, NOVA LEADS
 # 11. MISSION - NOVA LEADS, CREW FOLLOWS VIA TEAM.DISPATCH
 $novaLead = "You are NOVA, the team leader. YOUR FIRST ACTION in your FIRST response MUST be ONE team_dispatch call covering ALL 7 specialists (scout, researcher, analyst, engineer, writer, operator, foreman) with parallel:true. Give each a specific subtask with acceptance criteria and a specific session name for each. Do NOT pass resultSchema on workers - plain text results are accepted this way. Do NOT call shell_exec, fs_write, fs_read or fs_edit yourself - NOVA ORCHESTRATES, it does not build. After dispatching: monitor, re-dispatch any worker that returns invalid-result or refused with a simpler prompt, VERIFY each deliverable against the original task, and report every worker completion in chat. Never stop until EVERYTHING is complete and verified."
 Step "nova chat session: global"
@@ -237,18 +236,19 @@ try {
 $persisted = 0
 try { $list = Invoke-RestMethod -Uri ($Url + 'api/cron') -Headers $H -TimeoutSec 15; $persisted = @($list.jobs | Where-Object { $_.name -eq 'MISSION: NOVA' }).Count } catch {}
 if ($persisted -ge 1) { Step "mission: NOVA routine ready" } else { Warn "NOVA routine not persisted" }
-# 12. FIRE NOVA
+else { Warn ("mission routines: expected " + $Roles.Count + ", found " + $persisted) }
+# 12. FIRE ALL 8 IN PARALLEL
 if ($Kickoff -and (Test-Path -LiteralPath $Kickoff)) {
-  try {
-# 12. FIRE NOVA
-if ($Kickoff -and (Test-Path -LiteralPath $Kickoff)) {
-  try {
-    $cmdline = ('powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $Kickoff + '" -JobName "MISSION: NOVA"')
-    $spawn = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $cmdline; CurrentDirectory = $Repo }
-    if ($spawn.ReturnValue -ne 0) { Warn "NOVA kickoff failed" }
-  } catch { Warn "NOVA kickoff failed" }
-  Step 'NOVA fired'
+  foreach ($r in $Roles) {
+    try {
+      $cmdline = ('powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $Kickoff + '" -JobName "MISSION: ' + $r.name + '"')
+      $spawn = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $cmdline; CurrentDirectory = $Repo }
+      if ($spawn.ReturnValue -ne 0) { Warn ("kickoff " + $r.name + " failed") }
+    } catch { Warn ("kickoff " + $r.name + " failed") }
+  }
+  Step 'all 8 agents fired in parallel'
 }
+# 13. WAIT FOR PARALLEL CREW (need 5+ distinct agents to prove true parallelism)
 Step "waiting for agents (up to ${CrewWaitSec}s)..."
 $dl = (Get-Date).AddSeconds($CrewWaitSec); $lastLive = ''
 while ((Get-Date) -lt $dl) {
