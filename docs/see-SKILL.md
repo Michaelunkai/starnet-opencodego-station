@@ -1,48 +1,64 @@
 ---
 name: see
-description: "Convert screenshots and screen regions into TEXT so a text-only model can actually inspect them. Use whenever a task involves looking at a UI, a rendered page, a canvas, a game floor, a diagram, or any image the user sends. Also use before claiming any visual work is done."
+description: "Convert screenshots and screen regions into TEXT so a text-only model can actually inspect them. Use whenever a task involves looking at a UI, a rendered page, a canvas, a diagram, or any image the user sends. Also use before claiming any visual work is done."
 ---
 
 # See — vision bridge for text-only models
 
 ## The problem this exists to solve
 
-Most models on this host **cannot read images**. When a screenshot tool hands one of
-them a PNG, the tool returns:
+Most models on this host are **text-only**: a screenshot tool hands one a PNG and the
+result is
 
 ```
 ERROR: Cannot read image (this model does not support image input)
 ```
 
-The model is then left holding bytes it cannot interpret — and the predictable
-failure is an agent that *claims* visual verification it never performed
-("the screenshot proves it", "browser-proven"). That claim is always false on a
-blind model. It is the single most expensive failure mode in this environment.
+The model is then holding bytes it cannot read, and the predictable failure is an agent
+that *claims* visual verification it never performed ("the screenshot proves it"). That
+claim is always false on a blind model. This bridge removes the excuse: it turns pixels
+into **text**, which a blind model reads perfectly well.
 
 ## The rule
 
 **Never report a visual result you did not read through `see`.**
-
-If a task is visual, run `see` first. Its output is TEXT, so it works identically on
-a blind model and a sighted one. Paste its findings; do not paraphrase from memory.
 
 ## Usage
 
 ```powershell
 see --url http://127.0.0.1:8787/ "what is on screen?"
 see --url http://127.0.0.1:8787/ --check C:\Users\Admin\bin\see-checks.json
-see --monitor                # every display, stitched (7680x2160 on this box)
+see --url http://127.0.0.1:8787/ --regions            # split into regions, merge verdicts
+see --monitor                # every display, stitched
 see --monitor 0              # first display only
 see --file C:\Temp\shot.png "describe this"
-see --probe                  # which models can actually see, right now
+see --probe                  # which models can read an image, right now
 ```
 
-`--wait <ms>` lets a page settle before capture (default 3500; use 6000-9000 for a
-busy dashboard). `--save out.png` keeps the capture. `--full` grabs the whole page.
+`--wait <ms>` lets a page settle (default 3500; use 10000-12000 for a busy dashboard).
+A run can take **60-180 seconds** — it retries empty bodies and 503s on purpose.
+
+## MEASURED CAPABILITY — read this before you trust a result
+
+This is the honest picture, measured on this host against a dense 1920x1080 dashboard:
+
+| image | free models (`space-bunny-free`, `longcat-2.5-preview-free`) |
+|---|---|
+| simple synthetic (red field, blue square, "BLUE42") | **reads correctly** |
+| simple, wide, low-density region (a top bar) | **often reads** — but the same region failed 6/6 in one window and succeeded in another |
+| dense or tall region (a crew rail, a chat panel) | **usually empty** — 6/8, 7/7, 8/8 empty |
+| full-page dashboard | **never** readable, at any size or quality |
+
+**Consequence you must respect:** a single successful region read is *not* evidence that
+the path is reliable. It is one lucky sample. Do not generalise from one run.
+
+**Therefore:** if the UI is dense, free-only verification will mostly return INCONCLUSIVE.
+That is the correct outcome, and you must report it as such — "I could not visually verify
+this; no free model could read that region" — rather than substituting a paid model
+silently or claiming success. `--paid` exists and is the only way to permit a non-free
+model; using it is a decision to be made openly, not a fallback to slip in.
 
 ## Checking a UI against requirements
-
-Write the requirements as JSON and get a PASS/FAIL/UNSEEN table back:
 
 ```json
 { "items": [
@@ -56,36 +72,34 @@ Write the requirements as JSON and get a PASS/FAIL/UNSEEN table back:
 see --url http://127.0.0.1:8787/ --check checks.json
 ```
 
-The inspector is told to answer only from what is literally rendered and to say
-UNSEEN rather than guess. Exit code is `0` only when every item passed.
+The inspector answers only from what is literally rendered and says UNSEEN rather than
+guess. Exit code is `0` only when every item passed.
 
 ## When the user sends you an image
 
-Their attachment reaches you as an image part you may not be able to read. Do this
-instead of telling them to retype it:
+Their attachment reaches you as an image part you may not be able to read. Find the file
+on disk, then `see --file <path> "transcribe and describe everything in this image"`.
 
-```powershell
-# find the attachment on disk, then:
-see --file <path> "transcribe and describe everything in this image"
-```
+## How it behaves
 
-## How it works
+* **Free-models-only by default.** Only ids containing `free` may be spent. `--paid` is
+  the single, explicit opt-out. Every path — including `--probe` and `--check` — goes
+  through the same guard.
+* **Empty body is noise, never an answer.** The free models intermittently return an
+  empty body. That is retried to the full budget and is never reported as a result.
+* **A 503 is transient.** A TEXT request to both free models failed with 503 at the same
+  moment an IMAGE request to the same models succeeded. So 503s are retried with capped
+  backoff (`min(20, 3*attempt)`) and never read as a verdict.
+* **Blind answers are rejected.** A text-only model handed an image does not error — it
+  invents a plausible answer ("no screenshot is visible") that reads like a real verdict.
+  Answers matching a blindness marker are discarded and the next model is tried.
+* **Retry depth is model-class aware** (`resolved_attempts`): 8 for free models, 4
+  otherwise, because the free ones are the flaky ones and they are the mandatory ones.
+* **Capture truth is the file on disk, not the child's exit code.** `browser.close()`
+  can hang, so a perfectly good PNG was once discarded as "CAPTURE FAILED".
 
-`see` captures pixels (headless Chrome, a real desktop monitor grab, or a file),
-downscales them, and sends them to a **vision-capable** model on the OpenCodeGo
-proxy, returning that model's text answer.
+## When the bridge cannot help
 
-Sighted models on this host: `qwen3.8-max`, `deepseek-v4-flash-vision-exp`,
-`minimax-m3`. `see --probe` re-derives the live list instead of trusting this one.
-
-The bridge deliberately **refuses to use a blind model**: a text-only model handed
-an image does not error, it invents a plausible answer ("no screenshot is visible")
-that reads like a real verdict. Answers matching a blindness marker are discarded
-and the next model is tried, so a text-only improvisation can never be reported as
-a visual finding.
-
-## Reporting honestly
-
-If `see` cannot reach a sighted model it exits `5` and says so. That is the correct
-outcome to report: *"I could not visually verify this — no sighted model was
-available."* Never paper over it.
+`see` exits non-zero and says so. Report that plainly. The alternative for a dense UI is
+either a human look, or an explicit decision to spend a non-free model with `--paid`. Do
+not do either one silently.

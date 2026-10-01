@@ -54,10 +54,18 @@ USAGE
 -----
     see.py --url http://127.0.0.1:8787/ "What is visible? Is anything broken?"
     see.py --url http://127.0.0.1:8787/ --check checks.json
+    see.py --url http://127.0.0.1:8787/ --region 0,0,0.3,1 "left rail"
+    see.py --url http://127.0.0.1:8787/ --regions --check checks.json
     see.py --monitor 0 "Describe this monitor"
     see.py --file shot.png --check checks.json
     see.py --probe                 # which models can see, right now
     see.py --url <u> --save shot.png "..."
+
+--region left,top,right,bottom crops the capture to one panel (fractions 0-1)
+before it is sent; the default is the whole page. A cropped panel is a far
+simpler image than a full dashboard, which is what lets a free model read it.
+--regions checks several regions in one run and merges the verdicts, so one
+command can verify a whole UI on free models.
 
 --check FILE accepts JSON:
     {"items": ["bubbles appear above working agents", "..."]}
