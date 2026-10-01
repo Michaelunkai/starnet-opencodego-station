@@ -6703,6 +6703,11 @@ const Chat = (() => {
         if (!String(m.content == null ? '' : m.content).trim()) continue;
         const whoLive = (m.agentLabel || (m.agentId && agentLabel(m.agentId))) || 'STATION';
         const lr = row('agent', { stamp: stamp, who: whoLive });
+        // BIND THE ROW TO ITS DATA ROW. A said-once count bump re-renders just this node (see paintRow);
+        // without this handle the only way to update a badge was a full re-render, and renderHistory APPENDS
+        // to the log - so every bump appended another full copy of the thread, which is exactly how the same
+        // sentences piled up on screen dozens of times while the underlying history held one row each.
+        if (m.id) lr.d.setAttribute('data-row-id', String(m.id));
         renderProse(lr.body, m.content);
         continue;                                   // an activity beat is never the trailing dialogue turn
       }
@@ -9642,7 +9647,29 @@ const Chat = (() => {
           if (h.length > ACTIVITY_MAX) h.splice(0, h.length - ACTIVITY_MAX);
         }
         w.history = h;
-        if (w === activeWs) renderHistory(w);
+        // UPDATE THE ONE NODE IN PLACE. renderHistory() appends to the log (only load()/reconcile empty it
+        // first), so calling it to refresh a badge appended the ENTIRE thread again and again - that is what
+        // put nine copies of "[FOREMAN] Running a command" on screen from a history that held one row each.
+        // A badge bump now rewrites only the row that owns it.
+        if (w === activeWs) {
+          let painted = false;
+          if (row.id && log) {
+            const nodes = log.querySelectorAll('[data-row-id="' + String(row.id).replace(/"/g, '') + '"]');
+            for (const node of nodes) {
+              const body = node.querySelector('.body');
+              const chip = node.querySelector('.who');
+              if (body) { renderProse(body, row.content); painted = true; }
+              if (chip && row.agentLabel) chip.textContent = row.agentLabel;
+              node.classList.toggle('cmsg-repeat', (row.count || 1) > 1);
+            }
+          }
+          if (!painted) {
+            // No bound node yet (first paint of this row, or a repaint happened since): a full re-render is the
+            // only correct render, and it is safe because this path clears the log first.
+            if (log) log.innerHTML = '';
+            renderHistory(w);
+          }
+        }
       } catch (_) {}
     }
   }
@@ -9698,9 +9725,21 @@ const Chat = (() => {
       try {
         w.history = (w.history || []).concat([row]);
         if (w.history.length > ACTIVITY_MAX) w.history = w.history.slice(-ACTIVITY_MAX);
-        if (w === activeWs) renderHistory(w);
+        // Same append-only trap as paintRow: renderHistory() appends, so a fresh row goes into the log as its
+        // own node rather than by re-rendering (and duplicating) the whole thread.
+        if (w === activeWs) appendLiveRow(w, row);
       } catch (_) {}
     }
+  }
+
+  // Render ONE live activity row as a single appended node. Used for the first paint of a row and for any
+  // repaint that has no bound node to update, so a repaint never multiplies the thread.
+  function appendLiveRow(ws, row) {
+    if (!log || !row || !String(row.content == null ? '' : row.content).trim()) return;
+    const r = row('agent', { stamp: row.ts != null ? row.ts : true, who: row.agentLabel || agentLabel(row.agentId) });
+    if (row.id) r.d.setAttribute('data-row-id', String(row.id));
+    r.d.classList.toggle('cmsg-repeat', (row.count || 1) > 1);
+    renderProse(r.body, row.content);
   }
 
   function wireActivity() {

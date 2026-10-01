@@ -1145,6 +1145,79 @@ def tally(text):
 
 
 # --------------------------------------------------------------------------
+# --regions mode
+# --------------------------------------------------------------------------
+
+def run_regions_mode(order, image_bytes, prompt, items, spec):
+    """
+    Check every region in one run and merge the verdicts.
+
+    One model call per region (not per item): each region is asked the full
+    check list, answers the items it can actually see, and marks the rest
+    UNSEEN. merge_region_verdicts() then folds the per-region answers into one
+    verdict per item, so a single command verifies a whole UI on free models.
+
+    With no check items, it describes each region instead.
+    """
+    regions = load_regions(spec)
+    print("REGIONS: %d (%s)" % (len(regions), ", ".join(regions)))
+    print("")
+
+    region_texts = {}
+    for name, box in regions.items():
+        try:
+            cropped = crop_bytes(image_bytes, box)
+        except Exception as exc:
+            print("  %-14s CROP FAILED: %s" % (name, exc), file=sys.stderr)
+            continue
+        small = shrink(cropped)
+        log("region %s: %d -> %d bytes" % (name, len(cropped), len(small)))
+        try:
+            model, text, _note = ask_any_model(order, small, prompt,
+                                               max_tokens=3000)
+        except RefusedModel as exc:
+            print("REFUSED: %s" % exc, file=sys.stderr)
+            return 6
+        except NoSightedModel as exc:
+            print("  %-14s NO SIGHTED MODEL: %s" % (name, exc.details),
+                  file=sys.stderr)
+            continue
+        region_texts[name] = text
+        p, f, u = tally(text)
+        print("  %-14s %-28s %d PASS / %d FAIL / %d UNSEEN"
+              % (name, model, p, f, u))
+        for line in text.splitlines():
+            if VERDICT_RE.search(line):
+                print("      " + line.strip())
+
+    if not region_texts:
+        print("NO SIGHTED MODEL ANSWERED for any region. free-only is %s."
+              % ("ON" if FREE_ONLY else "OFF"), file=sys.stderr)
+        return 5
+
+    if not items:
+        print("")
+        for name, text in region_texts.items():
+            print("== %s ==" % name)
+            print(text)
+        return 0
+
+    print("")
+    merged, per_region, merged_lines = merge_region_verdicts(region_texts)
+    print("MERGED VERDICT (%d items):" % len(merged_lines))
+    for line in merged_lines:
+        print("  " + line)
+    p, f, u = merged
+    print("")
+    print("TALLY: %d PASS / %d FAIL / %d UNSEEN" % (p, f, u))
+    if f == 0 and p == 0:
+        print("NOTE: the models answered but wrote no parsable VERDICT lines; "
+              "that is not a pass.", file=sys.stderr)
+        return 1
+    return 0 if f == 0 else 1
+
+
+# --------------------------------------------------------------------------
 # main
 # --------------------------------------------------------------------------
 
