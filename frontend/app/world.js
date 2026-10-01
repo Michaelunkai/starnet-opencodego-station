@@ -4,7 +4,19 @@
    procedural bake (stationbake.js), under a pan/zoom camera. The agent has a
    workstation in its spawn room and ACTUALLY WALKS the rooms + corridors — pathing
    through doors via the model's BFS path() — to reach its seat when given a task,
-   then wanders the whole reachable station when idle. Edits made in REFIT build mode
+   
+
+     THE IDLE LAW (Commander's standing order, 2026-10-01). This header used to say idle
+     bodies "wander the whole reachable station", and the engine genuinely did that: a
+     want-engine whose fallback was a stroll, so an agent that was NOT working drifted around
+     the floor anyway. That is now forbidden and the code enforces it. An agent that is
+     provably idle must NOT MOVE AT ALL (freezeIdleCrew settles its parking slot exactly once,
+     on the first park, and never touches the position again), must have NO bubble (drawBubble
+     and drawChatterBubble both fail CLOSED - a liveness check that cannot be resolved counts
+     as NOT working, never as working), and must be UNAVAILABLE for socialising (bodyIsIdle
+     rejects a parked body, so gathering and glancing cannot walk up and set it talking).
+     Only a positive live-run count earns motion, WORKING, or a bubble.
+     Edits made in REFIT build mode
    re-bake the world live (the agent re-homes if the floor under it is reclaimed).
 
    Coordinate frame: everything here is in the bake's LOCAL tile frame (tile*TILE px);
@@ -2811,12 +2823,17 @@ const World = (() => {
     // RELEASE (never latched): a working body OR one with a live harness run falls straight through to
     // the normal engine. Only a provably-idle body (zero runs AND not working) is frozen below.
     if (b.working || live > 0) { b.parked = false; return false; }
-    b.working = false; b.sitting = false; b.dir = 'south';   // STAND at post facing the Commander — never a mid-air sit
-    // CLEAN PARKED SLOT: never stacked. If another parked body is within arm's length, slide along this
-    // body's index-fixed golden-angle slot until it clears the minimum separation (stable frame-to-frame:
-    // once separated the loop breaks and it does not move again).
+    b.working = false; b.sitting = false; b.dir = 'south';   // STAND at post facing the Commander �?" never a mid-air sit
+    // CLEAN PARKED SLOT, SETTLED EXACTLY ONCE - never on a later frame.
+    // This de-clash used to run on EVERY pass while the body was parked, sliding it up to six times to
+    // clear PARK_MIN_SEP. That is the precise opposite of the Commander's law: an agent that is not
+    // working must NOT MOVE AT ALL. A body that drifts for six frames after it goes idle is visibly
+    // moving, and it means "frozen" was never true. So the settle is gated on the FIRST park only
+    // (b.parked was false on entry); from the second pass onward the body is already clear and the
+    // position is left untouched. If two bodies genuinely cannot both fit, they stay where they are -
+    // honest overlap beats silent motion.
     try {
-      if (geo && geo.w && geo.h) {
+      if (!b.parked && geo && geo.w && geo.h) {
         for (let attempt = 0; attempt < 6; attempt++) {
           let clash = false;
           for (const k of crew) {
@@ -3566,6 +3583,10 @@ const World = (() => {
   // PLACED crew body now runs the inner life (stepCrew no longer gates the engine on b.summoned — desk-stuck
   // fix), so a free bay-bound body is a first-class idle body here too. Reads only — mutates nothing.
   function bodyIsIdle(b, now) {
+    // A PARKED body is NOT available for socialising. It was excluded by its own frozen state and has no
+    // goal, so the old test called it idle and startGathering/glance would walk up to it and set it
+    // talking - which is motion and speech on a body that must be perfectly still. Parked means parked.
+    if (b && b.parked) return false;
     if (!b || b.unplaced || b.state === 'walk' || b.working || b.goal != null) return false;
     if (agent && b === agent) return activity === 'idle';                 // hero: the single module-scope busy flag
     return b.workUntil <= now;                                            // crew (summoned OR bay-bound): alive unless mid-run
@@ -7733,7 +7754,11 @@ const World = (() => {
     // gap between an idle flip and the next engine tick. The hero is never frozen.
     if (who !== agent) {
       let liveC = 1;
-      try { liveC = (typeof agentRunsLive === 'function') ? agentRunsLive(String(who.agentId || '')) : 1; } catch (_) { liveC = 1; }
+      // FAIL CLOSED, NEVER OPEN. This used to default liveC = 1 when the lookup threw, which means
+  // "we could not check" was rendered as "this agent is working" - a bubble on a body that was
+  // not working, the precise lie the Commander forbade. Unknown now means NOT working: no bubble,
+  // no status, nothing drawn. Only a positive live-run count earns a bubble.
+  try { liveC = (typeof agentRunsLive === 'function') ? agentRunsLive(String(who.agentId || '')) : 0; } catch (_) { liveC = 0; }
       // LAW 1 (strict): zero live runs ⇒ NOTHING over a crew head, not even a lingering spoken line. `working`
       // is not evidence — a snapshot can rebuild that flag without a provable run, and a bubble on a body the
       // harness cannot prove is working is exactly the lie this gate exists to kill. The hero is exempt.
@@ -7933,7 +7958,11 @@ const World = (() => {
     // spoken/live-status bubble uses. The hero is never frozen.
     if (who !== agent) {
       let liveC = 1;
-      try { liveC = (typeof agentRunsLive === 'function') ? agentRunsLive(String(who.agentId || '')) : 1; } catch (_) { liveC = 1; }
+      // FAIL CLOSED, NEVER OPEN. This used to default liveC = 1 when the lookup threw, which means
+  // "we could not check" was rendered as "this agent is working" - a bubble on a body that was
+  // not working, the precise lie the Commander forbade. Unknown now means NOT working: no bubble,
+  // no status, nothing drawn. Only a positive live-run count earns a bubble.
+  try { liveC = (typeof agentRunsLive === 'function') ? agentRunsLive(String(who.agentId || '')) : 0; } catch (_) { liveC = 0; }
       if (liveC === 0) { who.chatter = null; return; }
     }
     const age = now - ch.at;
@@ -8447,7 +8476,11 @@ const World = (() => {
      per-frame). Reconnect reconciliation (snapshot fetch, below) is the PRIMARY correction; this TTL is the
      belt-and-suspenders that also covers the no-snapshot-endpoint case. */
   const runLastSeenByAgent = new Map();          // agentId -> performance.now() of the last reinforcing run event
-  const RUN_TTL_MS = 300000;                     // 5m with NO token/tool_call/cost/start/waiting event ⇒ the run is dead (agentRunsLive expires it at the read; the sweep also clears its pose)
+  // 20s, not 5m. A run is re-stamped by every real event (token/tool_call/cost/start/waiting), so a
+// long tail bought nothing and cost honesty: after a run ENDED, this body still counted as live
+// - WORKING lit, a bubble drawn - for up to five minutes. The Commander's law is that Working
+// means working. Twenty seconds covers a normal inter-event gap and nothing more.
+const RUN_TTL_MS = 20000;                     // 5m with NO token/tool_call/cost/start/waiting event ⇒ the run is dead (agentRunsLive expires it at the read; the sweep also clears its pose)
   const AWAIT_TTL_MS = 660000;                   // consent max (600s) + grace ⇒ a stuck await clears if its response was lost
   let awaitStampAt = 0;                           // performance.now() when the current awaitPrompt was last reinforced
   function stampRun(aid, rid) {
