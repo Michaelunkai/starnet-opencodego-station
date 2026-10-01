@@ -1,5 +1,0 @@
-[see] image 1761553 -> 153633 bytes for the vision call
-[see] qwen3.8-max -> HTTP 503, retrying in 3s
-[see] qwen3.8-max -> HTTP 503, retrying in 6s
-[see] qwen3.8-max -> HTTP 503, retrying in 9s
-[see] model qwen3.8-max failed: HTTP Error 503: Service Unavailable
