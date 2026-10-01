@@ -1,0 +1,12 @@
+{
+  "items": [
+    "The header shows a crew/agent list with named agents such as NOVA, RESEARCHER, ENGINEER, WRITER, SCOUT, OPERATOR, ANALYST, FOREMAN",
+    "There is a working/idle counter and it shows at least one agent as WORKING (not '0 WORKING')",
+    "The COMMS chat panel is connected - it does NOT say 'connecting' or 'connecting...'",
+    "The COMMS panel contains visible chat messages that appear to come from the crew",
+    "There is a large station/floor view (canvas) area showing the crew",
+    "No error text, red X, or 'failed' badge is visible anywhere in the crew list",
+    "Pause/stop controls such as PAUSE ALL / RESUME ALL / STOP ALL are visible in the top bar",
+    "Nothing looks frozen on a spinner, blank, or placeholder text"
+  ]
+}

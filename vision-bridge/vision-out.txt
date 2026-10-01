@@ -1,0 +1,13 @@
+SOURCE: shots\cap-20261001-045143.png
+MODEL:  deepseek-v4-flash-vision-exp
+
+VERDICT 1 | PASS | Left CREW panel lists named agents: "NOVA", "FOREMAN", "RESEARCHER", "ENGINEER" (each with Lv 1 / WORKING), and the COMMS panel header names "WRITER"; not all eight names (SCOUT, OPERATOR, ANALYST) are listed in the crew list. | 
+VERDICT 2 | PASS | Bottom of the crew panel reads "7 WORKING" alongside "1 IDLE", and individual agents show "WORKING" tags. | 
+VERDICT 3 | PASS | COMMS panel header reads "COMMS" with status text "online"; no "connecting..." string anywhere. | 
+VERDICT 4 | PASS | COMMS panel shows crew-originated content: "[WRITER] run ended (done)" and "– delegated to writer: MISSION - your exclusive slice, run until complete, highest priority:" plus "FULL TASK:" message body. | 
+VERDICT 5 | PASS | Large central canvas labelled "CAM · STATION OVERVIEW" with floor grid and agent figures/tags (LEAD, BLD, PLAN, OPS, OPEN3, VER, SCI DELI, DELIVERABLE.NOTE). | 
+VERDICT 6 | PASS | Crew list entries show only "WORKING" statuses (NOVA, FOREMAN, RESEARCHER, ENGINEER); no red X, "failed", or error badge is rendered. | 
+VERDICT 7 | PASS | Top bar right side shows "PAUSE ALL" and "STOP ALL" buttons. | 
+VERDICT 8 | PASS | No spinner/blank/placeholder: station view is populated, COMMS shows rendered text, left panel shows real session rows ("Routine now", "General now", "ALL / AUTOMATED"). The only overlay is the dismissible tip "Your panels now live in 4 docks down here – click one to open it" with a "GOT IT" button. |
+
+TALLY: 8 PASS / 0 FAIL / 0 UNSEEN

@@ -96,6 +96,50 @@ function ApiFireStream([string]$u, [hashtable]$hdr, $obj, [int]$t = 4000) {
     return $true
   } catch { return $false }
 }
+# Fire ONE routine in a DETACHED watcher process and return immediately. /api/cron/run STREAMS the run as
+# NDJSON and the sidecar binds res.on('close') -> ac.abort(): a run only survives while somebody holds its
+# stream open. Each routine gets its OWN process, so the crew fires genuinely in parallel - one shared
+# watcher drains one stream at a time and serialises the crew (measured: one specialist every ~25 s).
+function Fire-RoutineDetached([string]$jobId) {
+  $one = @"
+`$ErrorActionPreference='SilentlyContinue'
+`$t=(Get-Content -LiteralPath '$($TokenFile -replace "'", "''")' -Raw).Trim()
+`$rq = [System.Net.HttpWebRequest]::Create("http://127.0.0.1:$Port/api/cron/run")
+`$rq.Method = 'POST'; `$rq.ContentType = 'application/json'
+`$rq.Headers.Add('X-StarNet-Token', `$t)
+`$rq.Timeout = 600000; `$rq.ReadWriteTimeout = 600000
+`$rs = `$rq.GetRequestStream()
+`$bs = [Text.Encoding]::UTF8.GetBytes('{""id"":""' + '$jobId' + '""}')
+`$rs.Write(`$bs, 0, `$bs.Length); `$rs.Close()
+`$rp = `$rq.GetResponse(); `$sr = New-Object IO.StreamReader(`$rp.GetResponseStream())
+while (`$sr.ReadLine() -ne `$null) { }
+`$sr.Close(); `$rp.Close()
+"@
+  $b64 = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($one))
+  return (Start-Process -FilePath (Join-Path $PSHOME 'powershell.exe') -ArgumentList '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', $b64 -WindowStyle Hidden -PassThru)
+}
+# READ BACK every routine's enabled flag and FAIL LOUDLY if any is not enabled. A routine that exists but is
+# disabled is a dead crew member: the scheduler never fires it, the counter reads IDLE, and any "fired" report
+# is a lie. Repair once via /api/cron/update, then re-verify; a routine that is STILL disabled after the
+# repair aborts the launch instead of firing a ghost crew.
+function Assert-CrewEnabled([string[]]$names) {
+  $list = ApiGet ($Url + 'api/cron') $H 5000
+  if (-not $list) { Fail "could not read back the routine list - refusing to claim a crew is armed" }
+  $bad = @()
+  foreach ($n in $names) {
+    $j = @($list.jobs | Where-Object { $_.name -eq $n })[0]
+    if (-not $j) { $bad += ($n + ' (missing)'); continue }
+    if ($j.enabled -ne $true) {
+      [void](ApiPost ($Url + 'api/cron/update') $H (@{ id = $j.id; patch = @{ enabled = $true } } | ConvertTo-Json -Depth 8) 5000)
+      $list2 = ApiGet ($Url + 'api/cron') $H 5000
+      $j2 = @($list2.jobs | Where-Object { $_.name -eq $n })[0]
+      if (-not $j2 -or $j2.enabled -ne $true) { $bad += ($n + ' (enabled=False)') }
+      else { Step ('re-enabled routine: ' + $n) }
+    }
+  }
+  if ($bad.Count -gt 0) { Fail ('crew routines not enabled - refusing to fire a dead crew: ' + ($bad -join ', ')) }
+  Step ('enabled contract verified: all ' + $names.Count + ' crew routines report enabled=True')
+}
 function FirstExisting([string[]]$paths) {
   foreach ($p in $paths) { if ($p -and (Test-Path -LiteralPath $p)) { return (Resolve-Path -LiteralPath $p).Path } }
   return $null
@@ -269,6 +313,10 @@ $envLines = @(
   'set "STARNET_NO_QUESTIONS=1"'
   'set "STARNET_CRON_ENABLED=1"'
   'set "STARNET_CRON_LEAD=1"'
+  # The crew must always report. Without this the station's default routine persona invites every
+  # routine to answer EXACTLY "[SILENT]", and the mission chat degenerates into a wall of identical
+  # "- routine ran, nothing to report -" lines while the specialists actually do the work unheard.
+  'set "STARNET_CREW_ALWAYS_REPORTS=1"'
   'set "STARNET_CRON_MAX_RUN_MS=3600000"'
   'set "STARNET_CRON_HEARTBEAT_STALE_MS=1800000"'
   'set "STARNET_CRON_STALENESS_MULT=2"'
@@ -352,70 +400,9 @@ $persisted = 0
 $list = ApiGet ($Url + 'api/cron') $H 5000
 if ($list) { $persisted = @($list.jobs | Where-Object { $_.name -eq $novaName }).Count }
 if ($persisted -ge 1) { Step ("fresh crew routine ready: " + $novaName) } else { Warn "NEW crew routine not persisted" }
-# 12. FIRE THE CREW IMMEDIATELY - and, for the first time, actually let it live.
-#     /api/cron/run STREAMS the run as NDJSON and the sidecar binds `res.on('close') -> ac.abort()`: a run only
-#     survives while somebody is reading its stream. So the two old launch shapes were both broken - reading the
-#     body to the end parked the launcher for the whole run (135 s measured), and hanging up cancelled the run it
-#     had just started (every manual fire logged cron.result reason "cancelled", which is why the crew only ever
-#     appeared minutes later on the 3-minute schedule). Neither is acceptable. The launcher now hands the stream to
-#     a DETACHED watcher process and returns immediately: the watcher connects, fires the routine, drains the
-#     NDJSON until the run ends, and exits. Nothing the launcher does can abort the crew.
-$watchStarted = $false
-if ($persisted -ge 1) {
-  $list = ApiGet ($Url + 'api/cron') $H 5000
-  $freshJob = $null
-  if ($list) { $freshJob = @($list.jobs | Where-Object { $_.name -eq $novaName })[0] }
-  if (-not $freshJob) { Warn 'fresh crew routine vanished before it could fire' }
-  else {
-    $watchScript = @'
-$ErrorActionPreference = 'Stop'
-$port = {0}
-$tokFile = '{1}'
-$jobId = '{2}'
-$deadline = (Get-Date).AddHours(2)
-try {{
-  $tok = (Get-Content -LiteralPath $tokFile -Raw).Trim()
-  $url = 'http://127.0.0.1:' + $port + '/api/cron/run'
-  $body = [Text.Encoding]::UTF8.GetBytes((@{{ id = $jobId }} | ConvertTo-Json -Compress))
-  $r = [System.Net.HttpWebRequest]::Create($url)
-  $r.Method = 'POST'
-  $r.Timeout = 20000
-  $r.ReadWriteTimeout = 600000
-  $r.KeepAlive = $true
-  $r.ContentType = 'application/json'
-  $r.ContentLength = $body.Length
-  $r.Headers['X-StarNet-Token'] = $tok
-  $s = $r.GetRequestStream(); $s.Write($body, 0, $body.Length); $s.Close()
-  $resp = $r.GetResponse()
-  # DRAIN AND HOLD THE SOCKET OPEN. This process IS the watcher the sidecar's res.on('close') abort is waiting for:
-  # if it exits, the crew is cancelled. It only returns once the run ends or two hours pass.
-  $st = $resp.GetResponseStream()
-  $buf = New-Object byte[] 8192
-  while ($true) {{
-    if ((Get-Date) -gt $deadline) {{ break }}
-    $n = $st.Read($buf, 0, $buf.Length)
-    if ($n -le 0) {{ break }}
-  }}
-  $resp.Close()
-}} catch {{}}
-'@
-    $watchScript = $watchScript -f $Port, ($TokenFile -replace "'", "''"), ([string]$freshJob.id)
-    try {
-      $watchB64 = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($watchScript))
-      # No URL and no token on any command line: the port, the token file path and the routine id are baked into
-      # the encoded script, and the child reads the token from disk itself.
-      $wp = Start-Process -FilePath (Join-Path $PSHOME 'powershell.exe') -ArgumentList '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', $watchB64 -WindowStyle Hidden -PassThru
-      $watchStarted = $true
-      $fireAt = Elapsed
-      Step ("crew fired at ${fireAt}s via detached watcher pid " + $wp.Id + ": " + $novaName)
-    } catch {
-      # No watcher available: fall back to an in-process fire. The request still lands and the routine still holds
-      # a lease, but the run itself will be cancelled when this call returns - the schedule then fires it.
-      if (ApiFireStream ($Url + 'api/cron/run') $H @{ id = $freshJob.id } 4000) { $fireAt = Elapsed; Step ("crew fired immediately at ${fireAt}s (no watcher - the run may be cancelled on hangup): " + $novaName) }
-      else { $fireAt = Elapsed; Step 'crew fire acknowledged - the run continues in background' }
-    }
-  }
-}
+$crewNames = @($novaName)
+# 12. THE CREW FIRE moved below: the seven specialists are minted first (12b), every routine's enabled flag is
+#     read back and verified (12c), and only then are all eight fired in one detached-watcher breath (12d).
 # WHY EACH SPECIALIST GETS ITS OWN STREAM (crew-<agentId>, NOT 'global'):
 # the sidecar serialises runs per stream (overseer.withThread keys its queue on streamId). With all
 # eight routines pinned to 'global' the first run holds the lock and the other seven block in the
@@ -451,7 +438,14 @@ try {
     # left the crew with NO routines at all. Tag every crew name with the per-run id so each run
     # mints seven brand-new names - same trick the NOVA routine already uses.
     $cname = 'CREW: ' + $s.name + ' ' + $runTag
-    $cprompt = "MISSION - your exclusive slice, run until complete, highest priority:`r`n`r`nFULL TASK:`r`n" + $novaTask + "`r`n`r`nYOUR EXCLUSIVE SLICE (do ONLY this, nothing else): " + $s.slice + "`r`n`r`nRules: under 3000 characters of prompt, NO resultSchema, NO session field, work with your real tools, report the SPECIFIC actions you took (paths, commands, queries). Save your deliverable to YOUR workspace. Never stop until your slice is done. Never ask the Commander anything. `r`n`r`nREPORTING: after EVERY meaningful step, post one short plain-text line stating exactly what you just did and what the result was - the file you wrote, the command you ran, the fact you found. Do not batch your reporting to the end: the Commander watches the mission chat live and needs to see each step as it happens. Keep each line under 200 characters."
+    $crewNames += $cname
+    # The station's default routine persona invites a run to answer EXACTLY "[SILENT]" when it has
+    # nothing new, which is right for housekeeping and wrong for a mission crew: seven specialists
+    # ticking every three minutes all took the invitation and the group chat filled with an endless
+    # wall of identical "- routine ran, nothing to report -" lines while the real work went
+    # unreported. STARNET_CREW_ALWAYS_REPORTS=1 (set below) removes that invitation, and the
+    # MANDATORY REPORT block below makes the contract explicit at the prompt level too.
+    $cprompt = "MISSION - your exclusive slice, run until complete, highest priority:`r`n`r`nFULL TASK:`r`n" + $novaTask + "`r`n`r`nYOUR EXCLUSIVE SLICE (do ONLY this, nothing else): " + $s.slice + "`r`n`r`nRules: under 3000 characters of prompt, NO resultSchema, NO session field, work with your real tools, report the SPECIFIC actions you took (paths, commands, queries). Save your deliverable to YOUR workspace. Never stop until your slice is done. Never ask the Commander anything. `r`n`r`nREPORTING: after EVERY meaningful step, post one short plain-text line stating exactly what you just did and what the result was - the file you wrote, the command you ran, the fact you found. Do not batch your reporting to the end: the Commander watches the mission chat live and needs to see each step as it happens. Keep each line under 200 characters. `r`n`r`nMANDATORY FINAL REPORT: this run must END with at least one plain-text line in your own words naming what you did or verified in THIS run. If your slice is already complete, write one line that says so and names exactly what you checked. You must NEVER end a run with no output, and you must never answer [SILENT] - silence reads as a broken agent."
     $cbody = @{ name = $cname; schedule = 'every 3 minutes'; agentId = $s.id; prompt = $cprompt; enabled = $true; state = 'scheduled'; deliver = 'local'; attachToSession = $true; origin = @{ sessionId = ('crew-' + $s.id); streamId = ('crew-' + $s.id); sessionTitle = 'General' } } | ConvertTo-Json -Depth 8
     try {
       if ($existing.ContainsKey($cname)) {
@@ -464,54 +458,92 @@ try {
       }
     } catch { Warn ("crew routine " + $s.name + " failed: " + $_.Exception.Message) }
   }
-  if ($madeIds.Count -gt 0) {
-    $crewFiredAt = Elapsed
-    # ONE detached process per specialist. A single watcher cannot do this: /api/cron/run streams the
-    # run to completion, and draining it before the next request serialises the crew (measured: one
-    # specialist every ~25 s). Each child owns exactly one stream, so all seven truly run in parallel.
-    foreach ($cid in $madeIds) {
-      $one = @"
-`$ErrorActionPreference='SilentlyContinue'
-`$t=(Get-Content -LiteralPath '$($TokenFile)' -Raw).Trim()
-`$rq = [System.Net.HttpWebRequest]::Create("http://127.0.0.1:$Port/api/cron/run")
-`$rq.Method = 'POST'; `$rq.ContentType = 'application/json'
-`$rq.Headers.Add('X-StarNet-Token', `$t)
-`$rq.Timeout = 600000; `$rq.ReadWriteTimeout = 600000
-`$rs = `$rq.GetRequestStream()
-`$bs = [Text.Encoding]::UTF8.GetBytes('{""id"":""' + '$cid' + '""}')
-`$rs.Write(`$bs, 0, `$bs.Length); `$rs.Close()
-`$rp = `$rq.GetResponse(); `$sr = New-Object IO.StreamReader(`$rp.GetResponseStream())
-while (`$sr.ReadLine() -ne `$null) { }
-`$sr.Close(); `$rp.Close()
-"@
-      $b64 = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($one))
-      $null = Start-Process -FilePath (Join-Path $PSHOME 'powershell.exe') -ArgumentList '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', $b64 -WindowStyle Hidden -PassThru
+  if ($madeIds.Count -gt 0) { Step ("all " + $madeIds.Count + " specialist routines minted") }
+  # 12c. THE ENABLED CONTRACT - read back every routine's enabled flag and FAIL LOUDLY if any is not enabled.
+  #     A routine that exists but is disabled is a dead crew member: the scheduler never fires it, the counter
+  #     reads IDLE, and any "fired" report is a lie. Assert-CrewEnabled repairs once via /api/cron/update, then
+  #     re-verifies; a routine that is STILL disabled aborts the launch instead of firing a ghost crew.
+  Assert-CrewEnabled $crewNames
+  # 12d. FIRE ALL EIGHT in one detached-watcher breath - NOVA first (the lead), then the seven specialists.
+  #     ONE detached process per routine: /api/cron/run streams the run as NDJSON and the sidecar binds
+  #     res.on('close') -> ac.abort(), so a run only survives while its own watcher holds the stream open. A
+  #     single shared watcher drains one stream at a time and serialises the crew (measured: one specialist
+  #     every ~25 s) - one process per routine is what makes the fire genuinely parallel.
+  $fireDispatchedAtMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+  $fireCount = 0
+  foreach ($n in $crewNames) {
+    $fj = $null
+    $fl = ApiGet ($Url + 'api/cron') $H 5000
+    if ($fl) { $fj = @($fl.jobs | Where-Object { $_.name -eq $n })[0] }
+    if (-not $fj) { Warn ("routine vanished before it could fire: " + $n); continue }
+    try {
+      $wp = Fire-RoutineDetached ([string]$fj.id)
+      $fireCount++
+      Step ("fired " + $n + " at " + (Elapsed) + "s (detached watcher pid " + $wp.Id + ")")
+    } catch {
+      Warn ("fire dispatch failed for " + $n + ": " + $_.Exception.Message)
     }
-    Step ("all " + $madeIds.Count + " specialists fired in parallel at " + $crewFiredAt + "s")
   }
+  $crewFiredAt = Elapsed
+  $fireAt = $crewFiredAt
+  Step ("all " + $fireCount + " crew routines dispatched to detached watchers at " + $crewFiredAt + "s")
 } catch { Warn ("parallel crew fire failed: " + $_.Exception.Message) }
 
-# 13. CONFIRM THE PARALLEL CREW IS LIVE. The UI is already on screen and the run is already going, so this is only a
-#     bounded confirmation pass: 1 s polling (was 5 s) and a budget clamped to whatever is left of the 58 s hard cap,
-#     so it can never be the thing that pushes the launcher past the Commander's one-minute promise.
+# 13. PROVE TRUE CONCURRENCY - count DISTINCT live crew agents, print every sample, re-fire on shortfall.
+#     The launcher never reports success on "fired" alone: it polls /api/state/snapshot and counts how many of
+#     the eight expected crew agents are LIVE at the same instant, and only runs THIS launch fired count
+#     (startedAt >= the dispatch instant), so stale runs from a previous boot can never fake the proof. If
+#     fewer than eight ever appear, it says so and re-fires the missing ones - a silent "fired" report while
+#     nothing runs is the worst class of bug.
+$expectedAgents = [ordered]@{ 'agent' = 'NOVA'; 'researcher' = 'RESEARCHER'; 'analyst' = 'ANALYST'; 'engineer' = 'ENGINEER'; 'writer' = 'WRITER'; 'scout' = 'SCOUT'; 'operator' = 'OPERATOR'; 'foreman' = 'FOREMAN' }
 $crewWaitBudget = [math]::Min([double]$CrewWaitSec, (Remaining))
-if ($crewWaitBudget -ge 1) { Step ("waiting for agents (up to " + [math]::Round($crewWaitBudget) + "s)...") }
-$dl = (Get-Date).AddSeconds($crewWaitBudget); $lastLive = ''; $peak = 0; $firstLiveAt = 'n/a'
-while ((Get-Date) -lt $dl) {
+if ($crewWaitBudget -ge 1) { Step ("proving concurrency (up to " + [math]::Round($crewWaitBudget) + "s, sampling every 2s)...") }
+function Get-CrewLive {
   $snap = ApiGet ($Url + 'api/state/snapshot') $H 2500
-  if ($snap) {
-    $ids = @($snap.runs | ForEach-Object { $_.agentId })
-    if ($ids.Count -gt 0) {
-      $lastLive = ($ids -join ', ')
-      if ($firstLiveAt -eq 'n/a') { $firstLiveAt = Elapsed }
-      $distinct = @($ids | Sort-Object -Unique).Count
-      if ($distinct -gt $peak) { $peak = $distinct }
-      if ($distinct -ge 5) { break }
-    }
-  }
-  Start-Sleep -Milliseconds 1000
+  $live = @{}
+  if ($snap) { foreach ($r in @($snap.runs)) { if ($r.agentId -and $r.startedAt -ge $fireDispatchedAtMs) { $live[[string]$r.agentId] = $true } } }
+  return $live
 }
-if ($lastLive) { Step ("agents working at ${firstLiveAt}s (peak $peak parallel): " + $lastLive) } else { Warn "no agents visible yet" }
+$dl = (Get-Date).AddSeconds($crewWaitBudget); $peak = 0; $peakNames = ''; $firstLiveAt = 'n/a'; $everSeen = @{}
+while ((Get-Date) -lt $dl) {
+  $live = Get-CrewLive
+  $crewLive = @($expectedAgents.Keys | Where-Object { $live.ContainsKey($_) })
+  foreach ($a in $crewLive) { $everSeen[$a] = $true }
+  $distinct = $crewLive.Count
+  $names = ($crewLive | ForEach-Object { $expectedAgents[$_] }) -join ','
+  Step ("  live=$distinct : $names")
+  if ($distinct -gt $peak) { $peak = $distinct; $peakNames = $names }
+  if ($firstLiveAt -eq 'n/a' -and $distinct -gt 0) { $firstLiveAt = Elapsed }
+  if ($distinct -ge $expectedAgents.Count) { break }
+  Start-Sleep -Milliseconds 2000
+}
+# RE-FIRE any crew agent that never went live - never claim success on a shortfall.
+if ($everSeen.Count -lt $expectedAgents.Count) {
+  $missing = @($expectedAgents.Keys | Where-Object { -not $everSeen.ContainsKey($_) })
+  Warn ("only " + $peak + "/" + $expectedAgents.Count + " crew agents ever went live - re-firing: " + (($missing | ForEach-Object { $expectedAgents[$_] }) -join ', '))
+  $list = ApiGet ($Url + 'api/cron') $H 5000
+  foreach ($m in $missing) {
+    $mjob = $null
+    if ($list) { $mjob = @($list.jobs | Where-Object { $_.agentId -eq $m -and $_.name -match '^(MISSION|CREW):' })[0] }
+    if (-not $mjob) { Warn ("no routine found for missing agent " + $m); continue }
+    if ($mjob.enabled -ne $true) { [void](ApiPost ($Url + 'api/cron/update') $H (@{ id = $mjob.id; patch = @{ enabled = $true } } | ConvertTo-Json -Depth 8) 5000); Step ("re-enabled routine for " + $m) }
+    try { $wp = Fire-RoutineDetached ([string]$mjob.id); Step ("re-fired " + $m + " (detached watcher pid " + $wp.Id + ")") } catch { Warn ("re-fire failed for " + $m + ": " + $_.Exception.Message) }
+  }
+  $dl2 = (Get-Date).AddSeconds([math]::Min(30, (Remaining)))
+  while ((Get-Date) -lt $dl2) {
+    $live = Get-CrewLive
+    $crewLive = @($expectedAgents.Keys | Where-Object { $live.ContainsKey($_) })
+    foreach ($a in $crewLive) { $everSeen[$a] = $true }
+    $distinct = $crewLive.Count
+    $names = ($crewLive | ForEach-Object { $expectedAgents[$_] }) -join ','
+    Step ("  re-check live=$distinct : $names")
+    if ($distinct -gt $peak) { $peak = $distinct; $peakNames = $names }
+    if ($distinct -ge $expectedAgents.Count) { break }
+    Start-Sleep -Milliseconds 2000
+  }
+}
+if ($peak -ge $expectedAgents.Count) { Step ("CONCURRENCY PROVEN: " + $peak + " distinct live crew agents (first at " + $firstLiveAt + "s, peak: " + $peakNames + ")") }
+else { Warn ("CONCURRENCY NOT PROVEN: peak " + $peak + "/" + $expectedAgents.Count + " distinct live crew agents (peak: " + $peakNames + ") - the crew is NOT fully running") }
 # 14. VERIFY
 try { $r = Get-Content -LiteralPath (Join-Path $Workspace 'agent.roster.json') -Raw | ConvertFrom-Json; Step ("roster: " + (($r.agents | ForEach-Object { $_.agentId }) -join ', ')) } catch {}
 # 15. STATION STILL HEALTHY - one bounded probe, not a 30 s loop. The launcher already proved /api/health before the

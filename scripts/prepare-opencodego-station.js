@@ -99,19 +99,169 @@ const heroLite = {
 };
 save.doc.agents = [heroLite, ...team];
 
+/* PRUNE THE SESSION RAIL — the shared, PURE decision table used by both the boot prune and the
+   background reaper below, so "what may be deleted" is defined exactly once and the two can
+   never drift apart.
+
+   THE LEAK. Every armed routine fire mints its own `cron-<runId>` workstream (autosessions.js:149
+   `Workstreams.adopt({ id: 'cron-'+runId, ... })`), and every finished run is left behind with its
+   one-line status marker. A station that has been through a few hundred ticks therefore carries
+   200+ rows, almost all of them dead stubs — which is what buried the two sessions that matter
+   (the mission channel and the seven crew channels) and what the "couldn't load the output yet"
+   markers were being written into. Pruning ONCE at boot is worthless: the rail refills on the
+   very next tick. So the same table runs again from `runReaper()` for as long as the station lives.
+
+   KEEP / DROP TABLE (first matching rule wins):
+
+     | # | match                                     | action | why                                                     |
+     |---|-------------------------------------------|--------|---------------------------------------------------------|
+     | 1 | id === 'global'                           | KEEP   | the shared global mission channel                       |
+     | 2 | id starts with 'crew-'                    | KEEP   | a crew member's channel (crew-<agentId>)                |
+     | 3 | id starts with 'ws_' && is the HERO       | KEEP   | the Commander's own conversation (most recent, manual) |
+     | 4 | any row with REAL content                 | KEEP   | real user/agent prose, or >=1 deliverable               |
+     | 5 | id starts with 'cron-' && job is ARMED    | KEEP   | live routine (automation.id matches an enabled cron job)|
+     | 6 | id starts with 'cron-' && it is the LAST  | KEEP   | most recent run of an armed routine (job.lastRunId)     |
+     |     run of an ARMED routine                |        |                                                         |
+     | 7 | everything else                           | DROP   | a dead automation stub                                   |
+
+   RULE 4 IS THE SAFETY INVARIANT: it is evaluated from the row's state BEFORE anything is wiped,
+   so the prune can never delete a session that carries real history or real deliverables. A
+   corpse is precisely a row whose messages are all machine status lines (role 'system', sys:true)
+   — the "— routine ran, nothing to report —" one-liners — and which has no deliverable. Status
+   markers are telemetry about a run, not work, so they must NOT protect a corpse from deletion.
+
+   Every dropped id is also TOMBSTONED into `deletedIds`. That is the existing contract owned by
+   workstreams.js:154/240 (`adopt()` returns null for a tombstoned id unless `revive:true`), and it
+   is what makes the prune HOLD: a pruned `cron-<runId>` can never be re-minted by the boot
+   backfill (autosessions.js:324) or by the next fire's `beginSession` (autosessions.js:149). */
+const RailPrune = (() => {
+  const isChannel = (id) => id === 'global' || id.indexOf('crew-') === 0;
+  // REAL WORK = prose a person or an agent actually wrote. A machine status line is NOT work.
+  const isRealMessage = (m) => !!m && (m.role === 'user' || m.role === 'assistant') &&
+    String(m.content == null ? '' : m.content).trim() !== '';
+  function realContent(w) {
+    if (Array.isArray(w.history) && w.history.some(isRealMessage)) return true;
+    if (Array.isArray(w.deliverables) && w.deliverables.length) return true;
+    return false;
+  }
+  const isAutomation = (w) => !!(w && w.automation) || String((w && w.title) || '').indexOf('CHRONO') === 0;
+  // The REAL cron store: cron.jobs.json in the same workspace. `armed` = enabled job ids,
+  // `latest` = each armed job's lastRunId (the id a live cron-<runId> row is named after).
+  function readCronStore() {
+    const armed = new Set(), latest = new Set();
+    try {
+      const cronPath = path.join(WORKSPACE, 'cron.jobs.json');
+      if (!fs.existsSync(cronPath)) return { armed, latest };
+      const store = JSON.parse(fs.readFileSync(cronPath, 'utf8') || '{}');
+      const jobs = Array.isArray(store.jobs) ? store.jobs
+        : (Array.isArray(store.routines) ? store.routines : []);
+      for (const j of jobs) {
+        if (!j || !j.id) continue;
+        if (j.enabled === false) continue;
+        armed.add(String(j.id));
+        if (j.lastRunId) latest.add(String(j.lastRunId));
+      }
+    } catch (_) { /* fail-open: an unreadable store keeps nothing armed, so rules 5/6 never fire */ }
+    return { armed, latest };
+  }
+  function decide(all, cron) {
+    const armed = (cron && cron.armed) || new Set();
+    const latest = (cron && cron.latest) || new Set();
+    const rows = (Array.isArray(all) ? all : []).filter(Boolean);
+    // the hero conversation: the most recently active MANUAL ws_* stream (automation never wins).
+    let heroId = null, heroAt = -Infinity;
+    for (const w of rows) {
+      const id = String(w.id || '');
+      if (id.indexOf('ws_') !== 0 || isChannel(id) || isAutomation(w)) continue;
+      const at = Number(w.lastActiveAt || w.createdAt || 0) || 0;
+      if (at > heroAt) { heroAt = at; heroId = id; }
+    }
+    const keep = [], dropped = [];
+    for (const w of rows) {
+      const id = String(w.id || '');
+      let why = '';
+      if (isChannel(id))                 why = 'global mission channel';
+      else if (id.indexOf('crew-') === 0) why = 'crew channel';
+      else if (id === heroId)            why = 'hero conversation';
+      else if (realContent(w))           why = 'real history or deliverables';
+      else if (id.indexOf('cron-') === 0) {
+        const jobId = w.automation && String(w.automation.id || '');
+        if (jobId && armed.has(jobId))  why = 'session of ARMED routine ' + jobId;
+        else if (latest.has(id.slice(5))) why = 'last run of an ARMED routine';
+      }
+      if (why) keep.push({ w, why }); else dropped.push({ w, why: 'dead automation stub' });
+    }
+    return { keep, dropped };
+  }
+  return { decide, realContent, isAutomation, isChannel, readCronStore };
+})();
+
+/* THE REAPER — the fix that makes the prune HOLD instead of firing once.
+   prepare-opencodego-station.js runs once per station launch (launch-opencodego.ps1:251), but the
+   rail refills on every routine tick for as long as the station lives. So the boot run re-invokes
+   THIS SAME SCRIPT as a detached child (`--rail-reaper`), which re-applies the identical table
+   above on an interval and rewrites the save atomically. It reads the file fresh each tick, so it
+   always sees the browser's latest persist; it only ever rewrites doc.workstreams + doc.deletedIds
+   and leaves every other field (including _saveRevision) exactly as it found them. It is bounded
+   in lifetime and killable via STARNET_RAIL_REAPER=0 / STARNET_RAIL_REAPER_MS / _MAX_MS. */
+function runReaper() {
+  const intervalMs = Math.max(5000, Number(process.env.STARNET_RAIL_REAPER_MS) || 20000);
+  const lifeMs = Math.max(60000, Number(process.env.STARNET_RAIL_REAPER_MAX_MS) || 24 * 60 * 60 * 1000);
+  const deadline = Date.now() + lifeMs;
+  const tick = () => {
+    if (Date.now() > deadline) { process.exit(0); }
+    try {
+      if (!fs.existsSync(savePath)) return;
+      const doc = JSON.parse(fs.readFileSync(savePath, 'utf8'));
+      const cron = RailPrune.readCronStore();
+      const { keep, dropped } = RailPrune.decide(doc.doc && doc.doc.workstreams, cron);
+      if (!dropped.length) return;
+      doc.doc.workstreams = keep.map(k => k.w);
+      // tombstone every dropped id so adopt() can never re-mint it (workstreams.js:240).
+      const tombs = Array.isArray(doc.doc.deletedIds)
+        ? doc.doc.deletedIds.filter(x => typeof x === 'string' && x) : [];
+      for (const d of dropped) { const id = String(d.w.id || ''); if (id) tombs.push(id); }
+      doc.doc.deletedIds = tombs.slice(-500);   // matches workstreams.js MAX_TOMBS
+      const tmp = savePath + '.reaper.tmp';
+      fs.writeFileSync(tmp, JSON.stringify(doc, null, 2));
+      fs.renameSync(tmp, savePath);            // atomic: a reader never sees a half-written save
+      console.log('[rail-reaper] pruned dead sessions: ' + dropped.length + ' -> ' + doc.doc.workstreams.length + ' kept');
+    } catch (e) { console.warn('[rail-reaper] ' + ((e && e.message) || e)); }
+  };
+  tick();
+  setInterval(tick, intervalMs);   // intentionally NOT unref'd: this process exists to keep reaping
+}
+
+// In reaper mode do nothing but reap — never re-stamp the save.
+if (process.argv.indexOf('--rail-reaper') >= 0) { runReaper(); return; }
+
 // ---- clean stale station state so the station boots with no leftover errors ----
 // A previous session's failed runs ("no model selected", "out of credit") live in the chat history,
 // the run ledger and the transcript store; left in place they greet the Commander as if the station
 // were still broken. The station is re-prepared from a known-good config, so those are cleared here.
+// NOTE: the wipe runs AFTER the prune decision below, so the safety invariant is judged on real
+// pre-wipe content — never on state this block just erased.
 let clearedWorkstreams = 0;
-for (const ws of (Array.isArray(save.doc.workstreams) ? save.doc.workstreams : [])) {
-  if (Array.isArray(ws.history) && ws.history.length) clearedWorkstreams++;
-  ws.history = [];
-  ws.runIds = [];
-  ws.deliverables = [];
-  ws.lastRunOk = null;
-  ws.lastModel = null;
+let prunedWorkstreams = 0;
+{
+  const { keep, dropped } = RailPrune.decide(save.doc.workstreams, RailPrune.readCronStore());
+  prunedWorkstreams = dropped.length;
+  save.doc.workstreams = keep.map(k => k.w);
+  const tombs = Array.isArray(save.doc.deletedIds)
+    ? save.doc.deletedIds.filter(x => typeof x === 'string' && x) : [];
+  for (const d of dropped) { const id = String(d.w.id || ''); if (id) tombs.push(id); }
+  save.doc.deletedIds = tombs.slice(-500);
+  for (const w of save.doc.workstreams) {
+    if (Array.isArray(w.history) && w.history.length) clearedWorkstreams++;
+    w.history = [];
+    w.runIds = [];
+    w.deliverables = [];
+    w.lastRunOk = null;
+    w.lastModel = null;
+  }
+  console.log('  pruned dead sessions: ' + prunedWorkstreams + ' -> ' + save.doc.workstreams.length + ' kept');
 }
+
 const runsPath = path.join(WORKSPACE, 'runs.jsonl');
 try { if (fs.existsSync(runsPath)) fs.writeFileSync(runsPath, ''); } catch (_) {}
 // Remove the transcript store WHOLE (dir + manifest). Deleting only the segment files left the
@@ -171,3 +321,22 @@ console.log('roster written: ' + rosterPath + ' (' + roster.agents.length + ' ag
 // ---- ensure .run-journal dir ----
 fs.mkdirSync(journalDir, { recursive: true });
 console.log('journal dir ensured: ' + journalDir);
+
+// ---- START THE RAIL REAPER (the prune that HOLDS) ----
+// The boot prune above runs once per launch, but the rail refills on every routine tick, so a
+// once-only prune is worthless. Re-invoke this same script detached as `--rail-reaper`: it
+// re-applies the IDENTICAL RailPrune table on an interval for as long as the station lives.
+// Fail-open and silent: if the child cannot start, the station is unaffected.
+if (process.env.STARNET_RAIL_REAPER !== '0') {
+  try {
+    const { spawn } = require('node:child_process');
+    const child = spawn(process.execPath, [__filename, '--rail-reaper'], {
+      detached: true, stdio: 'ignore', windowsHide: true,
+      env: Object.assign({}, process.env)
+    });
+    child.unref();
+    console.log('  rail reaper started (every ' + (Number(process.env.STARNET_RAIL_REAPER_MS) || 20000) + 'ms)');
+  } catch (e) { console.log('  rail reaper not started: ' + ((e && e.message) || e)); }
+} else {
+  console.log('  rail reaper disabled by STARNET_RAIL_REAPER=0');
+}

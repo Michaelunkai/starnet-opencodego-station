@@ -1,0 +1,15 @@
+{
+  "_comment": "Default acceptance checklist for the StarNet crew station. Copy, edit, and pass with --check. Exit code is 0 only when every item PASSes.",
+  "items": [
+    "The crew list names every crew member: NOVA, FOREMAN, RESEARCHER, ENGINEER, ANALYST, WRITER, SCOUT, OPERATOR",
+    "The working/idle counter shows at least one agent as WORKING, not 0 WORKING",
+    "The COMMS panel is connected and does NOT say 'connecting'",
+    "Every message visible in COMMS is prefixed with the name of the agent that sent it, for example [RESEARCHER] or [ENGINEER]",
+    "The COMMS panel does not repeat the same line over and over (no wall of identical filler)",
+    "The station floor canvas is drawn large and populated with agent figures and nameplates",
+    "Agents that are working carry a bubble above their head naming the real tool and target they are using; agents that are idle carry no bubble",
+    "PAUSE ALL / RESUME ALL and STOP ALL controls are present in the top bar",
+    "No error badge, red X, or 'last run failed' marker is shown against a crew member that is supposed to be working",
+    "Nothing is frozen on a spinner, blank panel, or placeholder text"
+  ]
+}
