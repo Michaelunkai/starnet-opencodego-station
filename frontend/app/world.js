@@ -7748,17 +7748,22 @@ const World = (() => {
     // keep the HERO's caption up while it's still SPEAKING (a streamed neural reply can outlast the bubble's
     // fixed timer) — so the on-screen line and the voice stay in phase. Crew bodies just follow the timer.
     const speakingNow = (who === agent) && typeof Voice !== 'undefined' && Voice.isSpeaking && Voice.isSpeaking();
-    const sayLive = !!(s.text && (s.until >= now || speakingNow));
+    const sayLiveRaw = !!(s.text && (s.until >= now || speakingNow));
+    // CREW BUBBLES ARE WORK-ONLY (Commander law). A crew body's bubble must name the real tool+target it is
+    // touching right now, so its ambient self-talk — SELF_QUIET ("...", "so quiet"), SELF_CONTEMPLATE, etc. —
+    // NEVER owns the card. Before this, a working crew body could show a generic "..." over its head while the
+    // work card was suppressed. The hero keeps its spoken line (that is the Commander's own conversation).
+    const sayLive = (who === agent) ? sayLiveRaw : false;
     // COMMANDER LAW: a crew body with ZERO live harness runs is provably idle and draws NO bubble at all —
     // not even a lingering spoken line or a peer-chatter stamp. Freeze clears `say`; this closes the same-tick
     // gap between an idle flip and the next engine tick. The hero is never frozen.
     if (who !== agent) {
       let liveC = 1;
       // FAIL CLOSED, NEVER OPEN. This used to default liveC = 1 when the lookup threw, which means
-  // "we could not check" was rendered as "this agent is working" - a bubble on a body that was
-  // not working, the precise lie the Commander forbade. Unknown now means NOT working: no bubble,
-  // no status, nothing drawn. Only a positive live-run count earns a bubble.
-  try { liveC = (typeof agentRunsLive === 'function') ? agentRunsLive(String(who.agentId || '')) : 0; } catch (_) { liveC = 0; }
+      // "we could not check" was rendered as "this agent is working" — a bubble on a body that was
+      // not working, the precise lie the Commander forbade. Unknown now means NOT working: no bubble,
+      // no status, nothing drawn. Only a positive live-run count earns a bubble.
+      try { liveC = (typeof agentRunsLive === 'function') ? agentRunsLive(String(who.agentId || '')) : 0; } catch (_) { liveC = 0; }
       // LAW 1 (strict): zero live runs ⇒ NOTHING over a crew head, not even a lingering spoken line. `working`
       // is not evidence — a snapshot can rebuild that flag without a provable run, and a bubble on a body the
       // harness cannot prove is working is exactly the lie this gate exists to kill. The hero is exempt.
@@ -7801,9 +7806,12 @@ const World = (() => {
       const liveRuns = (typeof agentRunsLive === 'function') ? (agentRunsLive(tradeId) | 0) : 0;
       if (tradeId && liveRuns > 0) trade = tradePropFor(tradeId);
     } catch (_) { trade = null; }
-    // A live status with NEITHER a concrete sentence NOR a trade band has nothing truthful to show: draw
-    // nothing rather than an empty generic card. (A real spoken line always draws.)
-    if (!sayLive && !trade && !String(shown.text || '').trim()) return;
+    // LAW 2: with NO concrete sentence, a bubble may still draw ONLY if its trade band names a REAL in-flight
+    // tool (glyphByAgent proves one is running). A ROLE-ONLY card ("LEAD", "OPS") names no tool and no target —
+    // it is exactly the generic label the Commander forbade — so it is suppressed until a real tool_call arrives.
+    if (!sayLive && !String(shown.text || '').trim()) {
+      if (!trade || !trade.toolTag) return;
+    }
 
     // draw in SCREEN space (mirrors drawNameplate): pixel-snapped, unsmoothed VT323 that reads cleanly at any
     // zoom, then it rides the same barrel-curve/scanline pass the rest of the feed does. All geometry is CSS px.
@@ -7959,10 +7967,10 @@ const World = (() => {
     if (who !== agent) {
       let liveC = 1;
       // FAIL CLOSED, NEVER OPEN. This used to default liveC = 1 when the lookup threw, which means
-  // "we could not check" was rendered as "this agent is working" - a bubble on a body that was
-  // not working, the precise lie the Commander forbade. Unknown now means NOT working: no bubble,
-  // no status, nothing drawn. Only a positive live-run count earns a bubble.
-  try { liveC = (typeof agentRunsLive === 'function') ? agentRunsLive(String(who.agentId || '')) : 0; } catch (_) { liveC = 0; }
+      // "we could not check" was rendered as "this agent is working" — a bubble on a body that was
+      // not working, the precise lie the Commander forbade. Unknown now means NOT working: no bubble,
+      // no status, nothing drawn. Only a positive live-run count earns a bubble.
+      try { liveC = (typeof agentRunsLive === 'function') ? agentRunsLive(String(who.agentId || '')) : 0; } catch (_) { liveC = 0; }
       if (liveC === 0) { who.chatter = null; return; }
     }
     const age = now - ch.at;
@@ -8635,6 +8643,12 @@ const RUN_TTL_MS = 20000;                     // 5m with NO token/tool_call/cost
         const orphan = !!(r.runId && !(tracked && tracked.has(r.runId)));
         noteRunStart(r.agentId, r.runId);   // rebuild the overlap refcount from the authoritative live set
         stampRun(r.agentId, r.runId);
+        // WORK CARD FOR A MID-RUN PAGE LOAD: the server PROVES this run live, so the agent must read as working.
+        // `setActivityFor` below only seeds when the body already exists and only for an ORPHAN once, so a page
+        // loaded mid-run could show a lit, working agent with NO bubble at all. Seeding HERE — keyed on the run
+        // itself, before any body lookup — guarantees the tag-only card (role + live tool from glyphByAgent) is
+        // present for every provably-live agent, and a real tool_call refines it to a concrete sentence.
+        seedLiveStatus(r.agentId);
         if (orphan && !serverLit.has(r.agentId)) { serverLit.add(r.agentId); setActivityFor(r.agentId, 'task'); }
       }
       for (const aid of Array.from(runStartByAgent.keys())) if (!live.has(aid)) {   // ended during the outage
