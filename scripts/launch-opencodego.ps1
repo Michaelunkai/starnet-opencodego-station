@@ -416,6 +416,15 @@ try {{
     }
   }
 }
+# WHY EACH SPECIALIST GETS ITS OWN STREAM (crew-<agentId>, NOT 'global'):
+# the sidecar serialises runs per stream (overseer.withThread keys its queue on streamId). With all
+# eight routines pinned to 'global' the first run holds the lock and the other seven block in the
+# queue, so they never reach the agent loop - measured as 8 cron.fire events with 0 agent.run.start.
+# One stream AND one session per specialist means eight independent locks and no shared-session
+# contention on NOVA's 'global' session, so all eight reach the agent loop concurrently.
+# The Commander still sees everything in one place: the mission activity feed is driven by the live
+# harness bus (agent.tool_call / tool_result / run.start / run.end), not by the transcript stream, so
+# per-agent streams do not fragment the single mission chat.
 # 12b. FIRE ALL SEVEN SPECIALISTS DIRECTLY, IN PARALLEL, RIGHT NOW.
 # The Commander's promise is that the whole team is visibly WORKING within a minute. NOVA's own first
 # model turn is what dispatches the crew, and that turn can take anywhere from a few seconds to a full
@@ -443,7 +452,7 @@ try {
     # mints seven brand-new names - same trick the NOVA routine already uses.
     $cname = 'CREW: ' + $s.name + ' ' + $runTag
     $cprompt = "MISSION - your exclusive slice, run until complete, highest priority:`r`n`r`nFULL TASK:`r`n" + $novaTask + "`r`n`r`nYOUR EXCLUSIVE SLICE (do ONLY this, nothing else): " + $s.slice + "`r`n`r`nRules: under 3000 characters of prompt, NO resultSchema, NO session field, work with your real tools, report the SPECIFIC actions you took (paths, commands, queries). Save your deliverable to YOUR workspace. Never stop until your slice is done. Never ask the Commander anything. `r`n`r`nREPORTING: after EVERY meaningful step, post one short plain-text line stating exactly what you just did and what the result was - the file you wrote, the command you ran, the fact you found. Do not batch your reporting to the end: the Commander watches the mission chat live and needs to see each step as it happens. Keep each line under 200 characters."
-    $cbody = @{ name = $cname; schedule = 'every 3 minutes'; agentId = $s.id; prompt = $cprompt; enabled = $true; state = 'scheduled'; deliver = 'local'; attachToSession = $true; origin = @{ sessionId = 'global'; streamId = 'global'; sessionTitle = 'General' } } | ConvertTo-Json -Depth 8
+    $cbody = @{ name = $cname; schedule = 'every 3 minutes'; agentId = $s.id; prompt = $cprompt; enabled = $true; state = 'scheduled'; deliver = 'local'; attachToSession = $true; origin = @{ sessionId = ('crew-' + $s.id); streamId = ('crew-' + $s.id); sessionTitle = 'General' } } | ConvertTo-Json -Depth 8
     try {
       if ($existing.ContainsKey($cname)) {
         $patch = @{ id = $existing[$cname]; patch = @{ prompt = $cprompt; enabled = $true } } | ConvertTo-Json -Depth 8
